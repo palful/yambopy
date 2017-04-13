@@ -123,7 +123,7 @@ def IP_eps2(eiv,nv,nc,weights,dipoles,ntot_dip=-1,GWshift=0.,broad=0.01,broadtyp
     #Transition energies and matrix elements squared
     for c,v in product(range(nv,lc),range(iv,nv)):
         Ecv.append(eiv[:,c]-eiv[:,v])
-        DIP2.append(abs2(dipoles[:,0,c-nv,v])+abs2(dipoles[:,1,c-nv,v])+abs2(dipoles[:,2,c-nv,v])) #make more efficient
+        DIP2.append(abs2(dipoles[:,0,c-nv,v])+abs2(dipoles[:,1,c-nv,v])+abs2(dipoles[:,2,c-nv,v]))
     Ecv =np.array(Ecv)
     DIP2=np.array(DIP2)
     Ecv =np.swapaxes(Ecv,0,1)

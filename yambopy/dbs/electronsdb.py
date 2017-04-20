@@ -9,7 +9,7 @@ from itertools import product
 import collections
 ha2ev  = 27.211396132
 max_exp = 50
-min_exp =-100.
+min_exp =-50.
 
 def abs2(x):
     return x.real**2 + x.imag**2

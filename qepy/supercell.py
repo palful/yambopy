@@ -18,6 +18,14 @@ kb=8.6173e-5 # Boltzmann's constant (eV/K)
 Mp=1.0073 # Proton mass (reference, u)
 cMp=Mp*1.660539*6.241509e-29 # Conversion in eV*\AA^{-2}*s^2
 
+
+
+## TO FIX ##
+"""(i) read_frequencies and read_eig functions
+   (ii) building of (non)diag supercell must not be done
+        in __init__ but by specific calls of the related functions
+   (iii) fix the problem in nondiagonal supercell matrices
+"""
 def read_frequencies(modes_file,basis,header=4):
     """Read phonon frequencies from QE output phonon modes file
     """

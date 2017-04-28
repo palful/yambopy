@@ -203,9 +203,9 @@ class YamboDipolesDB():
         broadtype -> 'l' is lorentzian, 'g' is gaussian
         emin,emax,esteps -> frequency range for the plot
         """
-        #rescale polarization vector (matches with yambo -o c)
+        #rescale polarization vector (optional)
         efield=np.array(efield)
-        rescale = np.linalg.norm(efield/float(np.max(efield)))**2.
+        efield=efield/float(np.max(efield))
 
         #Eigenvalues
         eiv = electrons.eigenvalues
@@ -244,7 +244,6 @@ class YamboDipolesDB():
             dip2 =  abs2(efield[0]*dipoles[:,0,c,v]) \
                    +abs2(efield[1]*dipoles[:,1,c,v]) \
                    +abs2(efield[2]*dipoles[:,2,c,v])
-            dip2 *= rescale
             #make dimensions match
             dip2a = dip2[na,:]
             ecva  = ecv[na,:]

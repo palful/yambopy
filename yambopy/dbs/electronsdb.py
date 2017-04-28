@@ -231,7 +231,7 @@ class YamboElectronsDB():
         """
         Calculate the enegy of the gap (by Fulvio Paleari)
         """
-        eiv = self.eigenvalues_ibz
+        eiv = self.eigenvalues
         nv  = self.nbandsv
         nc  = self.nbandsc   
 

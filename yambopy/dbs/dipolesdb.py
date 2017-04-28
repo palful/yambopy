@@ -192,68 +192,66 @@ class YamboDipolesDB():
     def plot(self,ax,kpoint=0,dir=0,func=abs2):
         return ax.matshow(func(self.dipoles[kpoint,dir]))
         
-    def ip_eps2(self,electrons,pols=(0,1,2),ntot_dip=-1,GWshift=0.,broad=0.1,broadtype='l',nbnds=[-1,-1],emin=0.,emax=10.,esteps=500):
+    def ip_eps2(self,electrons,efield=[1,1,1],GWshift=0.,broad=0.1,broadtype='l',emin=0.,emax=10.,esteps=500):
         """
         Compute independent-particle absorption (by Fulvio Paleari)
 
         electrons -> electrons YamboElectronsDB
+        efield -> direction of incoming light
         GWshift -> rigid GW shift in eV
         broad -> broadening of peaks
         broadtype -> 'l' is lorentzian, 'g' is gaussian
-        nbnds -> number of [valence, conduction] bands included starting from Fermi level. Default means all are included
         emin,emax,esteps -> frequency range for the plot
         """
+        #rescale polarization vector (matches with yambo -o c)
+        efield=np.array(efield)
+        rescale = np.linalg.norm(efield/float(np.max(efield)))**2.
 
-        #get eigenvalues and weights of electrons
-        eiv = electrons.eigenvalues_ibz
-        weights = electrons.weights_ibz
+        #Eigenvalues
+        eiv = electrons.eigenvalues
+        weights = electrons.weights
         nv = electrons.nbandsv
         nc = electrons.nbandsc   
  
         #get dipoles
-        dipoles = self.dipoles_ibz 
+        dipoles = self.dipoles
 
         #get frequencies and im2
         freq = np.linspace(emin,emax,esteps)
         eps2 = np.zeros([len(freq)])
 
         #Cut bands to the maximum number used for the dipoles
-        if ntot_dip>0: 
-            eiv = eiv[:,:ntot_dip]
-            nc=ntot_dip-nv
-
+        iv = 0  #index of first valence
+        if self.nbandsv<nv: iv = nv-self.nbandsv
+        lc = nc  #index of last conduction
+        if self.nbandsc<nc: lc = nv+self.nbandsc
+        print eiv.shape
+        eiv=eiv[:,iv:lc]
         #Print band gap values and apply GW_shift
         eiv = electrons.energy_gaps(GWshift)
-
-        #Check bands to include in the calculation
-        if nbnds[0]<0: nbnds[0]=nv
-        if nbnds[1]<0: nbnds[1]=nc
-        iv = nv-nbnds[0] #first valence
-        lc = nv+nbnds[1] #last conduction
-
+        
         #choose broadening
         if "l" in broadtype:
             broadening = lorentzian
         else:
             broadening = gaussian
 
-        pols = np.array(pols)
         na = np.newaxis
         #calculate epsilon
         for c,v in product(range(nv,lc),range(iv,nv)):
             #get electron-hole energy and dipoles
             ecv  = eiv[:,c]-eiv[:,v]
-            dip2 = np.sum(abs2(dipoles[:,pols,c-nv,v]),axis=1)/float(len(pols))
-
+            dip2 =  abs2(efield[0]*dipoles[:,0,c,v]) \
+                   +abs2(efield[1]*dipoles[:,1,c,v]) \
+                   +abs2(efield[2]*dipoles[:,2,c,v])
+            dip2 *= rescale
             #make dimensions match
             dip2a = dip2[na,:]
             ecva  = ecv[na,:]
             freqa = freq[:,na]
-            wa    = weights[na,:]       
-  
+            wa    = weights[na,:] 
             #calculate the lorentzians 
             broadw = broadening(freqa,ecva,broad)
-   
             #scale broadening with dipoles and weights
             epsk =  wa*dip2a*broadw
 

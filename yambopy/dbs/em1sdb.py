@@ -4,23 +4,56 @@
 # This file is part of the yambopy project
 #
 from yambopy import *
-from netCDF4 import Dataset
+from yambopy.netcdf import *
+from subprocess import call
+
+def replace_serial(folder_to_replace, folder_to_get):
+    # Replace serial number in screening database
+    #
+    # Find database with the serial number to get
+    try:
+        db_to_get = Dataset('%s/ndb.em1s'%folder_to_get, 'r')
+    except:
+        try:
+            db_to_get = Dataset('%s/ndb.dip_iR_and_P'%folder_to_get, 'r')
+        except:
+            try:
+                db_to_get = Dataset('%s/ndb.gops'%folder_to_get, 'r')
+            except:
+                raise IOError("[ERROR] No serial number found at %s/"%folder_to_get)
+    #Get new serial number
+    serial_to_get = db_to_get['SERIAL_NUMBER'][:]
+    db_to_get.close()
+    #Create safety copy of database to change
+    call(["cp","%s/ndb_em1s"%folder_to_replace,"%s/ndb_em1s_original"%folder_to_replace])
+    #Get database to change
+    db_to_replace = Dataset('%s/ndb.em1s'%folder_to_replace, 'r+')
+    serial_to_replace = db_to_replace['SERIAL_NUMBER'][:]
+    # Print info
+    print('[WARNING] Changing serial number of %s/ndb.em1s'%folder_to_replace)
+    print('============================================')
+    print('Old serial number: %s'%serial_to_replace)
+    # Replace serial number
+    db_to_replace['SERIAL_NUMBER'][:] = serial_to_get
+    db_to_replace.close()
+    #Reload database to check
+    db_to_check = Dataset('%s/ndb.em1s'%folder_to_replace, 'r')
+    new_serial  = db_to_check['SERIAL_NUMBER'][:]
+    db_to_check.close()
+    print('New serial number: %s'%new_serial)
+    print('============================================')
 
 class YamboStaticScreeningDB():
     """
     Class to handle static screening databases from Yambo
     
-    This reads the databases ``ndb.em1s*``
-    There :math:`v\chi(\omega=0)` is stored.
+    This reads the databases ndb.em1s*
+    There vX is stored.
     
     To calculate epsilon (static dielectric function) we do:
 
-    .. math::
-
-        \epsilon = \\frac{1}{1-v\chi}
-
-        \epsilon^{-1} = 1-v\chi
-
+    epsilon = 1/(1-vX) or
+    epsilon^{-1} = 1-vX
     """
     def __init__(self,save='.',filename='ndb.em1s',db1='ns.db1'):
         self.save = save
@@ -79,21 +112,15 @@ class YamboStaticScreeningDB():
             filename = "%s/%s_fragment_%d"%(self.save,self.filename,nq+1)
             try:
                 db = Dataset(filename)
+
+                #static screening means we have only one frequency
+                re, im = db['X_Q_%d'%(nq+1)][0,:]
+                self.X[nq] = re + 1j*im
+     
+                #close database
+                db.close()
             except:
                 print "warning: failed to read %s"%filename
-
-
-            #static screening means we have only one frequency
-            # this try except is because the way this is sotored has changed in yambo
-            try:
-                re, im = db['X_Q_%d'%(nq+1)][0,:]
-            except:
-                re, im = db['X_Q_%d'%(nq+1)][0,:].T
-
-            self.X[nq] = re + 1j*im
-         
-            #close database
-            db.close()
 
     def saveDBS(self,path):
         """

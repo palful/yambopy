@@ -17,15 +17,12 @@ hbar=6.5821e-16 # Planck's constant (eV*s)
 kb=8.6173e-5 # Boltzmann's constant (eV/K)
 Mp=1.0073 # Proton mass (reference, u)
 cMp=Mp*1.660539*6.241509e-29 # Conversion in eV*\AA^{-2}*s^2
-
-
-
+#
 ## TO FIX ##
 """(i) read_frequencies and read_eig functions
-   (ii) building of (non)diag supercell must not be done
-        in __init__ but by specific calls of the related functions
    (iii) fix the problem in nondiagonal supercell matrices
 """
+#
 def read_frequencies(modes_file,basis,header=4):
     """Read phonon frequencies from QE output phonon modes file
     """
@@ -65,19 +62,24 @@ class supercell():
     """A class to generate custom supercells from a quantum espresso input file
     """
 
-    def __init__(self,qe_input,R,mode='diagonal',units='fractional',write=True,modes_file=None,Temp=0.):
+    def __init__(self,qe_input):
         """ 
         qe_input: a PwIn() instance of an input file in the unit cell (uc)
-        R: 
-        if default: R is a list of the repetitions of the uc in the cartesian directions (integers)
-        else: R contains the fractional coordinates of the q-point to be folded at Gamma in a nondiagonal supercell like [[m1,m2,m3],[n1,n2,n3]]
-        units: atomic positions in fractional(/angstrom/bohr)
+        Call self.d_sup(R) to build diagonal supercell
+            R is a list of repetitions of the uc in the cartesian direction
+        Call self.nd_sup(Q) to build nondiagonal supercell
+            Q contains the fractional coordinates of the q-point to be folded at Gamma in a nondiagonal supercell like [[m1,m2,m3],[n1,n2,n3]]
+        Call self.displace(modes_file,Temp=0.1) to displace supercell
+            modes_file is a QE-DFPT phonon-mode output
+            Temp is the width of the displacements in bohr
         """
         self.qe_input = qe_input
         self.latvec   = np.array(qe_input.cell_parameters)
         self.basis    = int(qe_input.system['nat'])
         self.atoms    = qe_input.atoms
-        #Case of nondiagonal supercell
+        self.uc_kpts  = qe_input.kpoints
+        self.atypes   = qe_input.atypes
+        """
         if mode!='diagonal':
             self.Q = np.array(R)
             print('Nondiagonal supercell')
@@ -97,6 +99,7 @@ class supercell():
         if write: 
             #PwIn() object that can be printed, written to file, etc.
             self.qe = self.write(new_atoms,mode)
+        
         #
         #Case of displaced supercell
         if modes_file is not None:
@@ -118,10 +121,33 @@ class supercell():
             if write:
                 #A list of PwIn() objects (one for each phonon mode) that can be printed, written to file, etc.
                 self.modes_qe = [self.write(new_atoms,mode,phonon=disps_slice) for disps_slice in self.disps]
-
+    """
 ###################################
 #[START] Phonon-related functions #                           
 ###################################
+    def displace(self,modes_file,new_atoms,Temp=0.1,write=True):
+        #Case of displaced supercell
+        print('Applying displacements according to phonon modes...')
+        self.initialize_phonons(modes_file,self.atypes,Temp)
+        phases = self.getPhases()                
+        expand_eigs = np.array([phases[i]*self.eigs for i in range(self.sup_size)])
+        #Take real part
+        for cell in range(self.sup_size): expand_eigs[cell]= self.take_real(expand_eigs[cell])
+        disps = expand_eigs.real.astype(float)
+        #Force same gauge choice
+        #for cell in range(self.sup_size): disps[cell]= self.force_gauge(disps[cell])
+        #Transform eigenmodes in displacements
+        #disps[cell][mode][basis][direction]
+        disps = np.array([self.osc_length(disp_slice) for disp_slice in disps])
+        #disps[mode][cell][basis][direction]
+        self.disps = disps.swapaxes(0,1)    
+        if write:
+            #A list of PwIn() objects (one for each phonon mode) that can be printed, written to file, etc.
+            if 'Q' in globals(): mode='nd'
+            else: mode='diagonal'
+            self.modes_qe = [self.write(new_atoms,mode,phonon=disps_slice) for disps_slice in self.disps]
+       
+
     def initialize_phonons(self,modes_file,atypes,Temp):
         #Read frequencies
         Omega = read_frequencies(modes_file,self.basis)
@@ -161,15 +187,21 @@ class supercell():
 
     def osc_length(self,eig):
         """Oscillator lengths per mode (in ANGSTROM)
+           NB:  For now, I can only set ARBITRARY displacements.
+           NB2: Eigenmodes from quantum espresso are ALREADY weighted by atomic masses
         """
+        
         RESCALE=b2a*self.Temp
         modes=3*self.basis
-        #mass_ratio = np.array([sqrt(Mp/mass) for mass in self.m_at])
+        """mass_ratio = np.array([sqrt(Mp/mass) for mass in self.m_at])
+        """
         displacements=[]
         for nu,eig_slice in enumerate(eig):
-            #l=sqrt(hbar/(2.*cMp*self.Omega[nu]))*RESCALE
-            #if self.Temp==0.: sigma2=l*l
-            #else: sigma2=l*l*(2./(np.exp(hbar*self.Omega[nu]/(kb*self.Temp))-1.)+1)
+            """
+            l=sqrt(hbar/(2.*cMp*self.Omega[nu]))
+            if self.Temp==0.: sigma2=l*l
+            else: sigma2=l*l*(2./(np.exp(hbar*self.Omega[nu]/(kb*self.Temp))-1.)+1)
+            """
             #Each mode (i.e. atomic displacement directions) is multiplied by the corresponding length
             displacements.append(RESCALE*eig_slice)
         displacements = np.array(displacements)
@@ -185,6 +217,32 @@ class supercell():
 #################################
     def lattice_constants(self,vec):
         return [np.linalg.norm(vec[0]),np.linalg.norm(vec[1]),np.linalg.norm(vec[2])]
+
+    def d_sup(self,R,write=True):
+        #Case of diagonal supercell     
+        self.R = R
+        self.sup_size = R[0]*R[1]*R[2]
+        self.new_latvec = np.array([self.latvec[i]*R[i] for i in range(3)])
+        self.sup_size = self.R[0]*self.R[1]*self.R[2]
+        new_atoms = self.build_supercell()
+        if write: 
+            #PwIn() object that can be printed, written to file, etc.
+            self.qe_d = self.write(new_atoms,mode='diagonal')
+        return new_atoms
+
+    def nd_sup(self,Q,write=True):
+        #Case of nondiagonal supercell
+        self.Q = np.array(Q)
+        print('Nondiagonal supercell')
+        if (self.uc_kpts % self.Q[1] != 0).any():
+            print('ERROR: You must set a unit cell k-point mesh where%s Nx,Ny,Nz are multiples of %d,%d,%d, respectively.'%('\n',self.Q[1,0],self.Q[1,1],self.Q[1,2]))
+            exit()
+        self.R, self.new_latvec = self.find_nondiagonal()
+        self.sup_size = self.R[0]*self.R[1]*self.R[2]
+        new_atoms = self.build_supercell()
+        if write:
+            self.qe_nd = self.write(new_atoms,mode='nd')
+        return new_atoms
 
     def build_supercell(self):
         latvec     = self.latvec

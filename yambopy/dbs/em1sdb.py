@@ -178,7 +178,7 @@ class YamboStaticScreeningDB():
             volume   -> Normalize with the volume of the cell
         """
         x = [np.linalg.norm(q) for q in self.qpoints]
-        y = [np.linalg.inv(1+xq)[0,0] for xq in self.X ]
+        y = [np.linalg.inv(np.eye(len(self.gvectors))+xq)[0,0] for xq in self.X ]
       
         #order according to the distance
         x, y = zip(*sorted(zip(x, y)))

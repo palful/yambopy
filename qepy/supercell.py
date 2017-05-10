@@ -11,39 +11,30 @@ from itertools import product
 import copy
 from math import *
 import fractions as frc
+# Dimensional constants for reference (actually only b2a is really used in the code for now)
+cm1_2_Tera=0.0299793 # Conversion from cm-1 to THz with 2pi factor included
 Tera=1.e12
 b2a =0.529177
 hbar=6.5821e-16 # Planck's constant (eV*s)
 kb=8.6173e-5 # Boltzmann's constant (eV/K)
 Mp=1.0073 # Proton mass (reference, u)
-cMp=Mp*1.660539*6.241509e-29 # Conversion in eV*\AA^{-2}*s^2
+cMp=Mp*1.660539*6.241509e-29 # Conversion of Mp in eV*\AA^{-2}*s^2
 #
 ## TO FIX ##
-"""(i) Clean up read_frequencies and read_eig functions
-   (iii) Fix the problem in nondiagonal supercell matrices
+"""(iii) Fix the problem in nondiagonal supercell matrices
 """
 #
-def read_frequencies(modes_file,basis,header=4):
+def read_frequencies(modes_file,units='Tera'):
     """Read phonon frequencies from QE output phonon modes file
     """
-    modes=3*basis
-    step = 1+basis
-    a=np.array([header+i*step for i in range(modes)])
     Omega=[]
     with open (modes_file) as fp:
-        for i,line in enumerate(fp):
-            if (i==a).any():
-                w=line
-                w=w.replace('freq (   ','')
-                w=w.replace('=   ','')
-                w=w.replace(')','')
-                w=w.replace(' [THz]','')
-                w=w.replace(' [cm-1]','')
-                w=w[22:]
-                w=w.strip()
+        for line in fp:
+            if line.strip()[0:4]=='freq':
+                w=re.findall(r"[-+]?\d*\.\d+|d+", line)
                 Omega.append(w)
-    Omega=np.array(map(float, Omega))
-    Omega=0.0299793*Omega #Conversion to THz with 2pi factor included
+    if units=='Tera': Omega= np.array(map(float, np.array(Omega)[:,0]))
+    else:             Omega= np.array(map(float, np.array(Omega)[:,1]))
     return Omega
 
 def read_eig(modes_file,basis):
@@ -108,11 +99,11 @@ class supercell():
 
     def initialize_phonons(self,modes_file,atypes,Temp):
         #Read frequencies
-        Omega = read_frequencies(modes_file,self.basis)
+        Omega = read_frequencies(modes_file)
         self.Omega = Omega*Tera #in hertz
         #Read phonon eigenmodes
         self.eigs = read_eig(modes_file,self.basis)
-        #Temperature
+        #Temperature/displacement
         self.Temp = Temp
         #Atomic masses (in u)
         self.m_at = np.array([float(atypes.values()[atypes.keys().index(self.atoms[i][0])][0]) for i in range(self.basis)])

@@ -19,8 +19,8 @@ Mp=1.0073 # Proton mass (reference, u)
 cMp=Mp*1.660539*6.241509e-29 # Conversion in eV*\AA^{-2}*s^2
 #
 ## TO FIX ##
-"""(i) read_frequencies and read_eig functions
-   (iii) fix the problem in nondiagonal supercell matrices
+"""(i) Clean up read_frequencies and read_eig functions
+   (iii) Fix the problem in nondiagonal supercell matrices
 """
 #
 def read_frequencies(modes_file,basis,header=4):
@@ -79,49 +79,7 @@ class supercell():
         self.atoms    = qe_input.atoms
         self.uc_kpts  = qe_input.kpoints
         self.atypes   = qe_input.atypes
-        """
-        if mode!='diagonal':
-            self.Q = np.array(R)
-            print('Nondiagonal supercell')
-            if (qe_input.kpoints % self.Q[1] != 0).any():
-                print('ERROR: You must set a unit cell k-point mesh where%s\
-       Nx,Ny,Nz are multiples of %d,%d,%d, respectively.'%('\n',self.Q[1,0],self.Q[1,1],self.Q[1,2])) 
-                exit()
-            self.R, self.new_latvec = self.find_nondiagonal()
-        #Case of diagonal supercell    
-        else: 
-            self.R = R
-            self.sup_size = R[0]*R[1]*R[2]
-            self.new_latvec = np.array([self.latvec[i]*R[i] for i in range(3)])
-        #
-        self.sup_size = self.R[0]*self.R[1]*self.R[2]
-        new_atoms = self.build_supercell()
-        if write: 
-            #PwIn() object that can be printed, written to file, etc.
-            self.qe = self.write(new_atoms,mode)
-        
-        #
-        #Case of displaced supercell
-        if modes_file is not None:
-            print('Applying displacements according to phonon modes...')
-            self.initialize_phonons(modes_file,qe_input.atypes,Temp)
-            phases = self.getPhases()                
-            expand_eigs = np.array([phases[i]*self.eigs for i in range(self.sup_size)])
-            #Take real part
-            for cell in range(self.sup_size): expand_eigs[cell]= self.take_real(expand_eigs[cell])
-            disps = expand_eigs.real.astype(float)
-            #Force same gauge choice
-            #for cell in range(self.sup_size): disps[cell]= self.force_gauge(disps[cell])
-            #Transform eigenmodes in displacements
-            #disps[cell][mode][basis][direction]
-            disps = np.array([self.osc_length(disp_slice) for disp_slice in disps])
-            #disps[mode][cell][basis][direction]
-            self.disps = disps.swapaxes(0,1)
-            
-            if write:
-                #A list of PwIn() objects (one for each phonon mode) that can be printed, written to file, etc.
-                self.modes_qe = [self.write(new_atoms,mode,phonon=disps_slice) for disps_slice in self.disps]
-    """
+ 
 ###################################
 #[START] Phonon-related functions #                           
 ###################################

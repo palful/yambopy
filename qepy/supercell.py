@@ -134,7 +134,7 @@ class supercell():
                 eig[i]=-eig[i]
         return eig
 
-    def osc_length(self,eig):
+    def osc_length(self,eig,temperature=0.):
         """Oscillator lengths per mode (in ANGSTROM)
            NB:  For now, I can only set ARBITRARY displacements.
            NB2: Eigenmodes from quantum espresso are ALREADY weighted by atomic masses
@@ -145,15 +145,18 @@ class supercell():
         """mass_ratio = np.array([sqrt(Mp/mass) for mass in self.m_at])
         """
         displacements=[]
+        lengths_per_mode=[]
         for nu,eig_slice in enumerate(eig):
-            """
             l=sqrt(hbar/(2.*cMp*self.Omega[nu]))
-            if self.Temp==0.: sigma2=l*l
-            else: sigma2=l*l*(2./(np.exp(hbar*self.Omega[nu]/(kb*self.Temp))-1.)+1)
-            """
+            if temperature==0.: sigma2=l*l
+            else: sigma2=l*l*(2./(np.exp(hbar*self.Omega[nu]/(kb*temperature))-1.)+1)
+            
             #Each mode (i.e. atomic displacement directions) is multiplied by the corresponding length
             displacements.append(RESCALE*eig_slice)
+            #List of average "realistic" atomic displacements (not weighted by atomic mass)
+            lengths_per_mode.append(np.sqrt(sigma2))
         displacements = np.array(displacements)
+        lengths_per_mode = np.array(lengths_per_mode)
         """
         for d,i in product(range(len(displacements)),range(self.basis)):
                 displacements[d,i,:] *= mass_ratio[i] #Weigh the displ. with the different masses

@@ -6,6 +6,7 @@
 from yambopy import *
 from yambopy.netcdf import *
 from subprocess import call
+import shutil
 
 def replace_serial(folder_to_replace, folder_to_get):
     # Replace serial number in screening database
@@ -85,7 +86,7 @@ class YamboStaticScreeningDB():
         self.eh = eh
 
         #read gvectors
-        gvectors = np.rint(database['X_RL_vecs'][:].T)
+        gvectors = database['X_RL_vecs'][:].T
         self.gvectors = np.array([g/self.alat  for g in gvectors])
         self.ngvectors = len(self.gvectors)
         
@@ -122,7 +123,7 @@ class YamboStaticScreeningDB():
             except:
                 print "warning: failed to read %s"%filename
 
-    def saveDBS(self,path):
+    def saveDBS(self,path,new_X=None):
         """
         Save the database
         """
@@ -138,7 +139,8 @@ class YamboStaticScreeningDB():
             shutil.copyfile("%s/%s"%(oldpath,fname),"%s/%s"%(path,fname))
 
         #edit with the new wfs
-        X = self.X
+        if new_X is None: X = self.X
+        else:             X = new_X
         for nq in xrange(self.nqpoints):
             fname = "%s_fragment_%d"%(filename,nq+1)
             db = Dataset("%s/%s"%(path,fname),'r+')

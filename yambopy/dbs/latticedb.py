@@ -7,8 +7,44 @@ from yambopy import *
 from netCDF4 import Dataset
 import itertools
 import operator
+from scipy.spatial import cKDTree
 
 atol = 1e-6
+
+def point_matching(a,b,double_check=True,debug=False,eps=1e-8):
+    """
+    Matches the points of list a to the points of list b
+    using a nearest neighbour finding algorithm
+
+    Arguments:
+
+        double_check: after the nearest neighbours are assigned check further
+        if the distance between points is within the precision eps
+
+        eps: precision for the double check (default: 1e-8)
+
+    """
+    #karma
+    a = np.array(a)
+    b = np.array(b)
+
+    #initialize thd kdtree
+    kdtree = cKDTree(a, leafsize=10)
+    map_b_to_a = []
+    for xb in b:
+        current_dist,index = kdtree.query(xb, k=1, distance_upper_bound=6)
+        map_b_to_a.append(index)
+    map_b_to_a = np.array(map_b_to_a)
+
+    if debug: print "took %4.2lfs"%(time()-start_time)
+
+    if double_check:
+        for ib,ia in enumerate(map_b_to_a):
+            dist = np.linalg.norm(a[ia]-b[ib])
+            if dist > eps:
+                raise ValueError('point a %d: %s is far away from points b %d: %s  dist: %lf'%(ia,str(a[ia]),ib,str(b[ib]),dist))
+
+    return map_b_to_a
 
 class YamboLatticeDB():
     """
@@ -71,11 +107,13 @@ class YamboLatticeDB():
         for i in xrange(nsym):
             self.time_rev_list[i] = ( i >= nsym/(self.time_rev+1) )
         
-    def expandKpoints(self):
+    def expandKpoints(self,qpoints=None):
         """
         Take a list of qpoints and symmetry operations and return the full brillouin zone
         with the corresponding index in the irreducible brillouin zone
         """
+        # Expand custom list (temporary)
+        if qpoints is not None: self.car_kpoints = qpoints
 
         #check if the kpoints were already exapnded
         kpoints_indexes  = []
@@ -84,12 +122,15 @@ class YamboLatticeDB():
 
         #kpoints in the full brillouin zone organized per index
         kpoints_full_i = {}
+        #kpoints in the WS cell
+        bz_star = {}        
 
         #expand using symmetries
         for nk,k in enumerate(self.car_kpoints):
             #if the index in not in the dicitonary add a list
             if nk not in kpoints_full_i:
                 kpoints_full_i[nk] = []
+                bz_star[nk] = []
                     
             for ns,sym in enumerate(self.sym_car):
                 
@@ -102,6 +143,7 @@ class YamboLatticeDB():
                 #if the vector is not in the list of this index add it
                 if not vec_in_list(k_bz,kpoints_full_i[nk]):
                     kpoints_full_i[nk].append(k_bz)
+                    bz_star[nk].append(new_k)
                     kpoints_full.append(new_k)
                     kpoints_indexes.append(nk)
                     symmetry_indexes.append(ns)
@@ -121,3 +163,4 @@ class YamboLatticeDB():
         self.red_kpoints      = car_red(self.car_kpoints,self.rlat)
         self.kpoints_indexes  = np.array(kpoints_indexes)
         self.symmetry_indexes = np.array(symmetry_indexes)
+        self.bz_star          = bz_star

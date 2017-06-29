@@ -139,6 +139,7 @@ class YamboLatticeDB():
                 #check if the point is inside the bounds
                 k_red = car_red([new_k],self.rlat)[0]
                 k_bz = (k_red+atol)%1
+                #k_bz = k_red
                 
                 #if the vector is not in the list of this index add it
                 if not vec_in_list(k_bz,kpoints_full_i[nk]):

@@ -3,107 +3,156 @@
 # (i.e. em1s / vX / chi) in supercells. 
 # Maybe it can be merged with em1s.py. 
 #
+# This is the plan:
+# (1) 
+#           Each Q in uc is connected to a q in sc by a sc lattice vector g_Q.
+#           The set of g_Qs allows us to pass from {QG} to {qg} and then from
+#           {Q+G1,Q+G2} to {q+g1,q+g2}: we have Q=q+g_Q, g1=g_Q+G1, g2=g_Q+G2.
+# (2) 
+#           This mapping works in the expanded BZ. This means we have to expand
+#           X_uc as well. Since for now I couldn't get it perfectly right, we
+#           just run the uc calculation in the full cell (noinv, nosym).
 from yambopy import *
 from itertools import product
-
+import math
+import bisect
+#
 class fold_vX():
-    """Starting points: fully computed vX in unit cell, trash run of vX in supercell
-       with consistent {qG} structure (k-point mesh, blocks cutoff).
+    """Starting points: computed vX in full unit cell, trash run of vX in supercell
+       with consistent {qG} structure ([1] k-point mesh, [2] blocks cutoff).
     """
-    def __init__(self,uc_lattice_path,uc_screening_path,sc_lattice_path,sc_screening_path,out_path='./em1s_folded'):
+    def __init__(self,uc_lattice_path,uc_screening_path,sc_lattice_path,sc_screening_path,out_path='./em1s_folded',check_grids=True):
         # (0) read dbs
-        ylat  = YamboLatticeDB(save=uc_lattice_path)
+        ylat  = YamboLatticeDB(save=uc_lattice_path,expand=False)
         ychi  = YamboStaticScreeningDB(save=uc_screening_path)
         yslat = YamboLatticeDB(save=sc_lattice_path)
         yschi = YamboStaticScreeningDB(save=sc_screening_path)
         self.ychi  = ychi
         self.yschi = yschi
         # now I have Gvectors, sgvectors, iQpts, isqpts in cartesian coordinates
-        self.gvectors  = ychi.gvectors
-        self.sgvectors = yschi.gvectors
-        self.iqpts  = ychi.qpoints
-        self.isqpts = yschi.qpoints
-        # (1) expand uc and sc in full BZ
-        ylat.expandKpoints(qpoints=self.iqpts)
-        self.ylat = ylat
-        self.qpts = ylat.car_kpoints 
-        yslat.expandKpoints(qpoints=self.isqpts)
-        self.yslat = yslat
-        self.sqpts = yslat.car_kpoints
-        # keep track of the positions of the ibz q-points in the expanded list
-        uc_map = point_matching(self.qpts,self.iqpts,double_check=False)
-        sc_map = point_matching(self.sqpts,self.isqpts,double_check=False)
-        self.iqpts_ind  = ylat.kpoints_indexes
-        self.isqpts_ind = yslat.kpoints_indexes
+        self.gvectors, self.sgvectors  = ychi.gvectors, yschi.gvectors
+        self.iqpts,    self.isqpts     = ychi.qpoints,  yschi.qpoints
+        # (1) expand uc and sc qpoints in full BZ
+        #uc already expanded
+        self.qpts = self.iqpts
+        self.sqpts, self.isqpts_ind, self.in_sIBZ = self.expand_qpts(yslat,self.isqpts)
         #
-        self.GG   = len(self.gvectors)
-        self.sGG  = len(self.sgvectors)
-        self.qq   = len(self.qpts)
-        self.iqq  = len(self.iqpts)
-        self.sqq  = len(self.sqpts)
-        self.isqq = len(self.isqpts)
-        """ Each Q in uc is connected to a q in sc by a sc lattice vector g_Q
-            The set of g_Qs allow us to pass from {QG} to {qg} and then from
-            {Q+G1,Q+G2} to {q+g1,q+g2}: we have Q=q+g_Q, g1=g_Q+G1, g2=g_Q+G2
-        """
-        # (4) Qqg contains the following indices: (Q,q,g) in {qpts,sqpts,sgvectors}
-        self.Qqg = self.get_Qqg()
-        #
-        self.new_x = self.match_X()
-        #
+        self.GG, self.sGG   = len(self.gvectors), len(self.sgvectors)
+        self.qq, self.iqq   = len(self.qpts),     len(self.iqpts)
+        self.sqq,self.isqq  = len(self.sqpts),    len(self.isqpts)
+        if check_grids:
+            print('Checking coverage...')
+            self.check_coverage2()
+        # (2) Qqg contains the following indices: (Q,q,g_Q) in {qpts,sqpts,sgvectors}
+        print('Creating Qqg list...')
+        self.Qqg  = self.get_Qqg()
+        print('Qqg list created. Creating Ggg list...')
+        self.Ggg  = self.get_Ggg()
+        print('Ggg list created. Starting X loop.')
+        # (3) Now match the values from X(iQ+G1,iQ+G2) to X(q+g1,q+g2)
+        self.X  = self.match_X()
+        # (4) Select only X(iq+g1,iq+g2)
+        self.new_x = np.array([ self.X[q] for q in range(self.sqq) if self.in_sIBZ[q]==1 ])
+        # (5) Save new em1s database. It has the same serial number as the sc database.
         self.yschi.saveDBS(out_path,new_X=self.new_x)
         print('folded DBS saved')
+        ###
+        ###
+    def expand_qpts(self,lat,irr_qpts):
+        #[i] Expand qpoints and keep track of the corresponding ones in the IBZ
+        lat.expandKpoints(qpoints=irr_qpts)
+        qpts = lat.car_kpoints
+        iqpts_ind = lat.kpoints_indexes
+        map_irr_to_full = point_matching(qpts,irr_qpts,double_check=False)
+        in_IBZ = np.zeros([len(qpts)],dtype=np.int)
+        in_IBZ[map_irr_to_full]=1
+        return qpts, iqpts_ind, in_IBZ
         #
-        # (2) function to recover the equivalent IBZ kpoint from a full-BZ kpoint
-    def make_irr(self,map_,ind_Q,Q,iqpts_list):
-        ind_iQ = map_[ind_Q]
-        iQ =iqpts_list[ind_iQ]
-        return ind_iQ, iQ
-    # (3) Get a list of the g_Q lattice vectors
-    def get_Qqg(self):
+    def expand_QG(self,q_points,g_vectors):
+        #[ii] Create expanded list of q+g vectors with index mapping
+        QQ, GG = len(q_points), len(g_vectors)
+        exp_pts   = np.zeros([QQ*GG,3])
+        exp_to_uc = np.zeros([QQ*GG,2],dtype=np.int64)
+        uc_to_exp = np.zeros([QQ,GG],dtype=np.int64)
+        for q,g in product(range(QQ),range(GG)):
+            it = q*GG+g
+            exp_pts[it]   = q_points[q]+g_vectors[g]
+            exp_to_uc[it] = [q,g]
+            uc_to_exp[q,g]= it 
+        return exp_pts,exp_to_uc,uc_to_exp
+        #
+    def check_coverage(self):
+        exp_uc,_,_ = self.expand_QG(self.qpts,self.gvectors)
+        exp_sc,_,_ = self.expand_QG(self.sqpts,self.sgvectors)
+        count = 0
+        for qp in exp_sc:
+            for Qp in exp_uc:
+                if np.isclose(qp,Qp,rtol=1e-05,atol=1e-05).all(): count+=1
+        if count != 0: raise IOError("[ERROR] %d qpoints not covered. Try to increase NGsBlkX in the unit cell calculation."%count)
+        else: print('Ok')
+    def check_coverage2(self,n=5):
+        #[iii] Check that the number of blocks in the uc covers all the sc points
+        exp_uc,_,_ = self.expand_QG(self.qpts,self.gvectors)
+        exp_sc,_,_ = self.expand_QG(self.sqpts,self.sgvectors)
+        ro_uc, ro_sc = np.round(exp_uc,n), np.round(exp_sc,n)
+        ro_uc, ro_sc = ro_uc.tolist(), ro_sc.tolist()
+        count = 0
+        for g in ro_sc:
+            if g not in ro_uc: count+=1
+        if count!=0: raise IOError("[ERROR] %d qpoints not covered. Try to increase NGsBlkX in the unit cell calculation."%count)
+        else: print('Ok')   
+        #      
+    def get_Qqg(self,thr=1e-6):
+        #[iv] Get the {Q,q,g_Q} index list [N^3 loop. I guess this could be fixed]
         qtemp = np.array( [[Q-q for q in self.sqpts] for Q in self.qpts] )
-        thr = 1e-5
         Qqg_list = []
         for i,Q in enumerate(qtemp):
             for j,q in enumerate(Q):
                 for k,g in enumerate(self.sgvectors):
-                    if (abs(q-g)<thr).all(): Qqg_list.append([i,j,k])
-        return np.array(Qqg_list)
-    # (5) Assign Xuc_G1G2(f(Q)) --> Xsc_g1g2(f(q))
+                    if (abs(q-g)<thr).all(): 
+                        Qqg_list.append([i,j,k])
+        Qqg_list = np.array(Qqg_list)
+        return Qqg_list
+        #
+    def get_Ggg(self):
+        #[v] Get the {G,g_Q,g} index list
+        g_Q_ind = np.unique(self.Qqg[:,2])
+        g_Qs    = np.array( [ self.sgvectors[i] for i in g_Q_ind ])
+        g_list = np.zeros([self.GG,len(g_Q_ind),3])
+        g_indices = np.zeros([self.GG,len(g_Q_ind)],dtype=np.int64)
+        for G in range(self.GG): 
+            g_list[G]=self.gvectors[G]+g_Qs
+            g_indices[G] = point_matching(self.sgvectors,g_list[G],double_check=False)
+        Ggg = []
+        for G,gq in product(range(self.GG),range(len(g_Q_ind))):
+            #This call is the heaviest part of the script: it should be made faster somehow 
+            if self.vecs_find(g_list[G,gq])==True: Ggg.append([G,g_Q_ind[gq],g_indices[G,gq]])
+        Ggg = np.array(Ggg)
+        return Ggg
+        #
+    def vecs_find(self,vec1):
+        check = False
+        for g in self.sgvectors:
+            if np.isclose(g,vec1,rtol=1e-05,atol=1e-05).all(): check = True 
+        return check
+    def vecs_find2(self,vec1,n=6):
+        #[vi] Check if g-vectors in Gg[g] list are inside the boundaries
+        ro_sc, ro_1  = np.round(self.sgvectors,n), np.round(vec1,n)
+        ro_sc, ro_1  = ro_sc.tolist(), ro_1.tolist()
+        return ro_1 in ro_sc
     def match_X(self):
-        new_x = np.zeros([self.sqq,self.sGG,self.sGG],dtype=np.complex64)
-        v_scale = self.ychi.volume/self.yschi.volume
+        #[vii] Loop on Q,G1,G2 (~N^3) to obtain X(q)_g1g2
+        gvectors  = self.gvectors
+        sgvectors = self.sgvectors
+        full_x = np.zeros([self.sqq,self.sGG,self.sGG],dtype=np.complex64)
         for Q in range(self.qq):
-            for G1,G2 in product(range(self.GG),repeat=2):
-                #Find indices of g1=g_Q+G1 and g2=g_Q+G2
-                gtemp1=self.gvectors[G1]+self.sgvectors[self.Qqg[Q,2]]
-                gtemp2=self.gvectors[G2]+self.sgvectors[self.Qqg[Q,2]]
-                #Check that g1 and g2 are not outside the cutoff
-                if self.Gcond(gtemp1)==True and self.Gcond(gtemp2)==True:
-                    #I'm not proud of this. point_matching does not work
-                    #with one-element lists to compare...
-                    gtemp1 = np.array([gtemp1,gtemp1])
-                    gtemp2 = np.array([gtemp2,gtemp2])
-                    _g1 =point_matching(self.sgvectors,gtemp1,double_check=False)
-                    g1=_g1[0]
-                    _g2 =point_matching(self.sgvectors,gtemp2,double_check=False)
-                    g2=_g2[0]
-                    #Find indices of iq/iQ, the equivalents of q/Q ind the IBZ
-                    iq,_ = self.make_irr(self.isqpts_ind,self.Qqg[Q,1],self.sqpts[self.Qqg[Q,1]],self.isqpts)
-                    iQ,_ = self.make_irr(self.iqpts_ind,self.Qqg[Q,0],self.qpts[self.Qqg[Q,0]],self.iqpts)
-                    #
-                    new_x[iq,g1,g2]=self.ychi.X[iQ,G1,G2]
-        #new_x = v_scale*new_x
-        return new_x
-    def Gcond(self,g_to_check):
-        Gmax_values = []
-        for i in range(3):
-            M = abs(np.max(self.gvectors[:,i]))
-            m = abs(np.min(self.gvectors[:,i]))
-            if M>=m: Gmax_values.append(M)
-            else:    Gmax_values.append(m)
-        Gmax_values = np.array(Gmax_values)
-        g_tc=abs(g_to_check)
-        eps=1e-5
-        condition = ( g_tc[0]<=Gmax_values[0]+eps and g_tc[1]<=Gmax_values[1]+eps and g_tc[2]<=Gmax_values[2]+eps )
-        return condition
+            g_Q = self.Qqg[Q,2]
+            q   = self.Qqg[Q,1]
+            G_and_g = self.Ggg[self.Ggg[:,1]==g_Q]
+            for j1,j2 in product(range(len(G_and_g)),repeat=2):
+            #for j1 in range(len(G_and_g)):
+                #j2=j1
+                G1,G2 = G_and_g[j1,0], G_and_g[j2,0]
+                g1,g2 = G_and_g[j1,2], G_and_g[j2,2]
+                full_x[q,g1,g2]=self.ychi.X[Q,G1,G2] 
+        return full_x

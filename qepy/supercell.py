@@ -70,6 +70,7 @@ class supercell():
         self.atoms    = qe_input.atoms
         self.uc_kpts  = qe_input.kpoints
         self.atypes   = qe_input.atypes
+        self.aunits   = qe_input.atomic_pos_type
  
 ###################################
 #[START] Phonon-related functions #                           
@@ -200,7 +201,8 @@ class supercell():
         latvec     = self.latvec
         R          = self.R
         atoms      = np.array([atom[1] for atom in self.atoms])
-        atoms      = red_car(atoms,latvec) 
+        if self.aunits!='angstrom': atoms = red_car(atoms,latvec) 
+        else: latvec = b2a*latvec
         #new_atoms[cell][basis][direction]
         new_atoms      = np.array([atoms for n in range(self.sup_size)])
         T = []
@@ -210,10 +212,11 @@ class supercell():
             for b in range(self.basis): new_atoms[cell,b]=new_atoms[cell,b] +translation
             T.append(translation)
         T = np.array(T) #Positions of the repeated unit cells
-        self.T=car_red(T,self.latvec)
+        if self.aunits!='angstrom': self.T=car_red(T,self.latvec)
+        else: self.T=T
         #new_atoms[super_basis][directions]$
         new_atoms=new_atoms.reshape(self.basis*self.sup_size,3)
-        new_atoms=car_red(new_atoms,self.new_latvec)
+        if self.aunits!='angstrom': new_atoms = car_red(new_atoms,self.new_latvec)
         return new_atoms
 
     def find_integers(self,nums,g23,g12,g31,g123):

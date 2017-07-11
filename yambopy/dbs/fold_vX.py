@@ -83,23 +83,35 @@ class fold_vX():
         #
     def check_coverage(self):
         exp_uc,_,_ = self.expand_QG(self.qpts,self.gvectors)
-        exp_sc,_,_ = self.expand_QG(self.sqpts,self.sgvectors)
+        exp_sc,exp_to_sc,_ = self.expand_QG(self.sqpts,self.sgvectors)
         count = 0
-        for qp in exp_sc:
+        list_of_points_not_covered = []
+        for i,qp in enumerate(exp_sc):
             for Qp in exp_uc:
-                if np.isclose(qp,Qp,rtol=1e-05,atol=1e-05).all(): count+=1
-        if count != 0: raise IOError("[ERROR] %d qpoints not covered. Try to increase NGsBlkX in the unit cell calculation."%count)
+                if np.isclose(qp,Qp,rtol=1e-05,atol=1e-05).all(): 
+                    count+=1
+                    list_of_points_not_covered.append(exp_to_sc[i])
+        if count != 0:
+            list_of_points_not_covered = np.array(list_of_points_not_covered)
+            np.savetxt('points_not_covered.dat',list_of_points_not_covered) 
+            raise IOError("[ERROR] %d qpoints not covered. Try to increase NGsBlkX in the unit cell calculation."%count)
         else: print('Ok')
     def check_coverage2(self,n=5):
         #[iii] Check that the number of blocks in the uc covers all the sc points
         exp_uc,_,_ = self.expand_QG(self.qpts,self.gvectors)
-        exp_sc,_,_ = self.expand_QG(self.sqpts,self.sgvectors)
+        exp_sc,exp_to_sc,_ = self.expand_QG(self.sqpts,self.sgvectors)
         ro_uc, ro_sc = np.round(exp_uc,n), np.round(exp_sc,n)
         ro_uc, ro_sc = ro_uc.tolist(), ro_sc.tolist()
         count = 0
-        for g in ro_sc:
-            if g not in ro_uc: count+=1
-        if count!=0: raise IOError("[ERROR] %d qpoints not covered. Try to increase NGsBlkX in the unit cell calculation."%count)
+        list_of_points_not_covered = []
+        for i,g in enumerate(ro_sc):
+            if g not in ro_uc: 
+                count+=1
+                list_of_points_not_covered.append(exp_to_sc[i])
+        if count!=0: 
+            list_of_points_not_covered = np.array(list_of_points_not_covered)
+            np.savetxt('points_not_covered.dat',list_of_points_not_covered)            
+            raise IOError("[ERROR] %d qpoints not covered. Try to increase NGsBlkX in the unit cell calculation."%count)
         else: print('Ok')   
         #      
     def get_Qqg(self,thr=1e-6):

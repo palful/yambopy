@@ -1,6 +1,6 @@
 #
 #
-#
+# This file is part of yambopy
 #
 import os
 import re
@@ -20,10 +20,10 @@ kb=8.6173e-5 # Boltzmann's constant (eV/K)
 Mp=1.0073 # Proton mass (reference, u)
 cMp=Mp*1.660539*6.241509e-29 # Conversion of Mp in eV*\AA^{-2}*s^2
 #
-## TO FIX ##
-"""(iii) Fix the problem in nondiagonal supercell matrices
+## ISSUES TO FIX ##
+"""(iii) Small issue in nondiagonal supercell matrices for certain q-vectors
 """
-#
+## These two functions read phonons from qe output
 def read_frequencies(modes_file,units='Tera'):
     """Read phonon frequencies from QE output phonon modes file
     """
@@ -49,6 +49,7 @@ def read_eig(modes_file,basis):
     # eig[mode][atom][direction]
     return eig
 
+## Start of the proper supercell class
 class supercell():
     """A class to generate custom supercells from a quantum espresso input file
     """
@@ -57,12 +58,12 @@ class supercell():
         """ 
         qe_input: a PwIn() instance of an input file in the unit cell (uc)
         Call self.d_sup(R) to build diagonal supercell
-            R is a list of repetitions of the uc in the cartesian direction
+            R is a list of repetitions of the uc in the cartesian directions
         Call self.nd_sup(Q) to build nondiagonal supercell
             Q contains the fractional coordinates of the q-point to be folded at Gamma in a nondiagonal supercell like [[m1,m2,m3],[n1,n2,n3]]
         Call self.displace(modes_file,Temp=0.1) to displace supercell
             modes_file is a QE-DFPT phonon-mode output
-            Temp is the width of the displacements in bohr
+            Temp is the width of the displacements in bohr (for now; in the future it will be the harmonic displacements at a certain temperature)
         """
         self.qe_input = qe_input
         self.latvec   = np.array(qe_input.cell_parameters)
@@ -72,9 +73,9 @@ class supercell():
         self.atypes   = qe_input.atypes
         self.aunits   = qe_input.atomic_pos_type
  
-###################################
-#[START] Phonon-related functions #                           
-###################################
+#########################################
+#[START] Displacement-related functions #                           
+#########################################
     def displace(self,modes_file,new_atoms,Temp=0.1,write=True):
         #Case of displaced supercell
         print('Applying displacements according to phonon modes...')
@@ -165,9 +166,9 @@ class supercell():
         #displacements[mode in order of ascending frequency][basis]
         return displacements
 
-#################################
-#[END] Phonon-related functions #   
-#################################
+#######################################
+#[END] Displacement-related functions #   
+#######################################
     def lattice_constants(self,vec):
         return [np.linalg.norm(vec[0]),np.linalg.norm(vec[1]),np.linalg.norm(vec[2])]
 
@@ -232,7 +233,7 @@ class supercell():
                     if (nums[1]+i*nums[2]) % g23 == 0:
                         p=i
                         break
-        if nums[0]==0: q,r=[0,1] #[POSSIBLE BUG] These conditions must be checked carefully
+        if nums[0]==0: q,r=[0,1] #[POSSIBLE BUG for certain q-vectors] These conditions must be checked carefully
         else:
             #Compute q
             g12_r = g12/g123

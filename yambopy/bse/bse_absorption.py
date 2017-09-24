@@ -127,11 +127,11 @@ class YamboBSEAbsorptionSpectra(YamboSaveDB):
         self.data["excitons"] = []
 
         #create a ypp file using YamboIn for reading the wavefunction
-        yppwf = YamboIn('ypp -e w',filename='ypp.in',folder=self.path)
+        yppwf = YamboIn('ypp -e w -V all',filename='ypp.in',folder=self.path)
         yppwf['Format'] = Format
         yppwf['Direction'] = Direction
-        yppwf['FFTGvecs'] = FFTGvecs
-        yppwf['Degen_Step'] = Degen_Step
+        yppwf['FFTGvecs'] = [FFTGvecs,'Ry']
+        yppwf['Degen_Step'] = [Degen_Step,'eV']
         yppwf['Hole'] = [Hole,'']
         yppwf['Cells'] = [Cells,'']
 
@@ -151,9 +151,10 @@ class YamboBSEAbsorptionSpectra(YamboSaveDB):
                 ##############################################################
                 #create ypp input for the wavefunction file and run
                 yppwf["States"] = "%d - %d"%(i,i)
-                yppwf.write("yppwf_%d.in"%i)
+                yppwf.write("%s/yppwf_%d.in"%(self.path,i))
 
                 filename = "o-%s.exc_%dd_%d%s"%(self.job_string,len(Direction),i,{"g":"","x":".xsf"}[Format] )
+                print filename
                 if not os.path.isfile(filename):
                     os.system("cd %s; ypp -F yppwf_%d.in -J %s"%(self.path,i,self.job_string))
 
@@ -162,11 +163,45 @@ class YamboBSEAbsorptionSpectra(YamboSaveDB):
                     ewf = YamboExcitonWaveFunctionXSF()
                 else:
                     ewf = YamboExcitonWaveFunctionGnuplot()
-                ewf.read_file(filename)
+                ewf.read_file("%s/%s"%(self.path,filename))
                 data = ewf.get_data()
                 for word in keywords:
                     if word in data:
                         self.data[word] = data[word]
+
+                #calculate center of mass of atoms
+                lat = np.array(data["lattice"])
+                center_atom = np.zeros([3])
+                for atype,x,y,z in data["atoms"]:
+                    center_atom += np.array([x,y,z])
+                center_atom /= len(data["atoms"])
+                center_atom_red = car_red([center_atom],lat)[0]
+
+                #shift wavefunctions grid to center of mass
+                nx = data['nx'] 
+                ny = data['ny'] 
+                nz = data['nz']
+
+                #make center_atom_red commensurate with fft
+                center_atom_red = center_atom_red * np.array([nx,ny,nz])
+                center_atom_red_int = [int(x) for x in center_atom_red]
+                displacement = np.array([nx,ny,nz])/2-center_atom_red_int
+                dx,dy,dz = displacement
+
+                # shift grid
+                # http://www.xcrysden.org/doc/XSF.html 
+                dg  = np.array(data["datagrid"]).reshape([nz,ny,nx])
+                dg  = np.roll(dg,dx,axis=2)
+                dg  = np.roll(dg,dy,axis=1)
+                dg  = np.roll(dg,dz,axis=0)
+                data["datagrid"] = dg.flatten()
+
+                #shift atoms
+                atoms = []
+                dx,dy,dz = red_car([displacement/np.array([nx,ny,nz],dtype=float)],lat)[0]
+                for atype,x,y,z in data["atoms"]:
+                    atoms.append([atype,x+dx,y+dy,z+dz])
+                self.data["atoms"] = atoms
 
             ##############################################################
             # Excitonic Amplitudes

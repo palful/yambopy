@@ -7,14 +7,31 @@ from yambopy import *
 from math import sqrt
 from time import time
 
+max_exp = 50
+min_exp =-100.
+
 def abs2(x):
     return x.real**2 + x.imag**2
-    
+ 
+def lorentzian(x,x0,g):
+    height=1./(np.pi*g)
+    return height*(g**2)/((x-x0)**2+g**2)
+
+def gaussian(x,x0,s):
+    height=1./(np.sqrt(2.*np.pi)*s)
+    argument=-0.5*((x-x0)/s)**2
+    #Avoiding undeflow errors...
+    np.place(argument,argument<min_exp,min_exp)
+    return height*np.exp(argument)
+
 class YamboDipolesDB():
     """
-    Open the dipoles databases and store it in a DipolesDB class
+    Class to read the dipoles databases from the ``ndb.dip*`` files
+    
+    Can be used to for exapmle plot the imaginary part of the dielectric
+    function which corresponds to the optical absorption
     """
-    def __init__(self,lattice,save='SAVE',filename='ndb.dip_iR_and_P',expand=True,dip_type='iR'):
+    def __init__(self,lattice,save='SAVE',filename='ndb.dip_iR_and_P',dip_type='iR'):
         self.lattice = lattice
         self.filename = "%s/%s"%(save,filename)
         
@@ -41,9 +58,7 @@ class YamboDipolesDB():
         self.dipoles = self.readDB(dip_type)
 
         #expand the dipoles to the full brillouin zone
-        self.expand = expand
-        if expand:
-            self.expandDipoles(self.dipoles)
+        self.expandDipoles(self.dipoles)
 
     def normalize(self,electrons):
         """ 
@@ -140,7 +155,10 @@ class YamboDipolesDB():
             factor =  1.0
         else:
             factor = -1.0
-            
+           
+        #save dipoles in the ibz
+        self.dipoles_ibz = dipoles 
+        #get dipoles in the full Brilouin zone
         self.dipoles = np.zeros([nkpoints,3,nbands,nbands],dtype=np.complex64)
         for nk_fbz,nk_ibz,ns in zip(xrange(nkpoints),nks,nss):
             
@@ -174,96 +192,87 @@ class YamboDipolesDB():
     def plot(self,ax,kpoint=0,dir=0,func=abs2):
         return ax.matshow(func(self.dipoles[kpoint,dir]))
         
-    def plot_dp_bs(self,path,bandv,bandc,dir=0,spin=0):
-        """ Plot the dipole along a path
+    def ip_eps2(self,electrons,efield=[1,1,1],GWshift=0.,broad=0.1,broadtype='l',emin=0.,emax=10.,esteps=500):
         """
-        dipoles, kpts = self.get_dipoles(expand=True)
+        Compute independent-particle absorption (by Fulvio Paleari)
 
-        bands_kpoints, bands_indexes, bands_highsym_qpts = self.get_path(path,kpts)
-
-        #calculate distances
-        bands_distances = [0]
-        distance = 0
-        for nk in range(1,len(bands_kpoints)):
-            distance += np.linalg.norm(bands_kpoints[nk-1]-bands_kpoints[nk])
-            bands_distances.append(distance)
-
-        #check if bandc is an integer
-        if type(bandc) is int: bandc = (bandc,)
-        #check if bandv in an integer
-        if type(bandv) is int: bandv = (bandv,)
-
-        print "tansitions %s -> %s"%(str(bandv),str(bandc))
-
-        #get kpoints in path
-        dipole_bands = dipoles[bands_indexes]
-
-        #get spin
-        dipole_bands = dipole_bands[:,:,spin]
-
-        #project along q?
-        dipole_bands = dipole_bands[:,dir,:,:]
-
-        #absolute value
-        dipole_bands = np.absolute(dipole_bands[:,:,:])**2
-
-        #plot highsymetry qpoints
-        distance = 0
-        for nk in range(1,len(bands_highsym_qpts)):
-            plt.axvline(distance,color='k')
-            distance+=np.linalg.norm(bands_highsym_qpts[nk]-bands_highsym_qpts[nk-1])
-
-        for c,v in zip(bandc,bandv):
-            plt.plot(bands_distances,dipole_bands[:,c-1,v-1],label="%d -> %d"%(c,v))
-        plt.legend()
-        plt.show()
-
-    def plot_dp_bz(self,bandv,bandc,size=20,dir=0,spin=0,field_dir=[1,0,0],expand=True,repx=range(1),repy=range(1),repz=range(1)):
-        """ Plot the weights in a scatter plot of this exciton
+        electrons -> electrons YamboElectronsDB
+        efield -> direction of incoming light
+        GWshift -> rigid GW shift in eV
+        broad -> broadening of peaks
+        broadtype -> 'l' is lorentzian, 'g' is gaussian
+        emin,emax,esteps -> frequency range for the plot
         """
-        cmap = plt.get_cmap("viridis")
+        #rescale polarization vector (optional)
+        efield=np.array(efield)
+        efield=efield/float(np.max(efield))
 
-        dipoles, kpts = self.get_dipoles(field_dir=field_dir,expand=expand)
+        #Eigenvalues
+        eiv = electrons.eigenvalues
+        weights = electrons.weights
+        nv = electrons.nbandsv
+        nc = electrons.nbandsc   
+ 
+        #get dipoles
+        dipoles = self.dipoles
 
-        #check if bandc is an integer
-        if type(bandc) is int: bandc = (bandc,)
-        #check if bandv in an integer
-        if type(bandv) is int: bandv = (bandv,)
+        #get frequencies and im2
+        freq = np.linspace(emin,emax,esteps)
+        eps2 = np.zeros([len(freq)])
 
-        print "tansitions %s -> %s"%(str(bandv),str(bandc))
-        weights = np.zeros([len(kpts)])
-        for c,v in zip(bandc,bandv):
-            weights += np.absolute(dipoles[:,dir,spin,c-1,v-1])**2
-        weights = np.array([x for x in weights])
-        weights = weights
+        #Cut bands to the maximum number used for the dipoles
+        iv = 0  #index of first valence
+        if self.nbandsv<nv: iv = nv-self.nbandsv
+        lc = nc  #index of last conduction
+        if self.nbandsc<nc: lc = nv+self.nbandsc
+        print eiv.shape
+        eiv=eiv[:,iv:lc]
+        #Print band gap values and apply GW_shift
+        eiv = electrons.energy_gaps(GWshift)
+        
+        #choose broadening
+        if "l" in broadtype:
+            broadening = lorentzian
+        else:
+            broadening = gaussian
 
-        fig = plt.figure(figsize=(10,10))
-        print len(kpts)
-        for x,y,z in product(range(-1,2),range(-1,2),range(1)):
-            #shift the brillouin zone
-            d = red_car([np.array([x,y,z])],self.lattice.rlat)[0]
+        na = np.newaxis
+        #calculate epsilon
+        for c,v in product(range(nv,lc),range(iv,nv)):
+            #get electron-hole energy and dipoles
+            ecv  = eiv[:,c]-eiv[:,v]
+            dip2 =  abs2(efield[0]*dipoles[:,0,c,v]) \
+                   +abs2(efield[1]*dipoles[:,1,c,v]) \
+                   +abs2(efield[2]*dipoles[:,2,c,v])
+            #make dimensions match
+            dip2a = dip2[na,:]
+            ecva  = ecv[na,:]
+            freqa = freq[:,na]
+            wa    = weights[na,:] 
+            #calculate the lorentzians 
+            broadw = broadening(freqa,ecva,broad)
+            #scale broadening with dipoles and weights
+            epsk =  wa*dip2a*broadw
 
-            plt.scatter(kpts[:,0]+d[0], kpts[:,1]+d[1], s=size, marker='H', lw=0, cmap=cmap, c=weights)
-        plt.axes().set_aspect('equal', 'datalim')
-        plt.colorbar()
+            #integrate over kpoints
+            eps2 += np.sum(epsk,axis=1)
 
-        plt.show()
+        return freq, eps2
 
     def __str__(self):
         s = ""
         s += "\nkpoints:\n"
         s += "nk_ibz : %d\n"%self.nk_ibz
-        if self.expand: s += "nk_bz  : %d\n"%self.nk_bz
+        s += "nk_bz  : %d\n"%self.nk_bz
         s += "\nnumber of bands:\n"
         s += "nbands : %d\n" % self.nbands
         s += "nbandsv: %d\n" % self.nbandsv
         s += "nbandsc: %d\n" % self.nbandsc
         s += "indexv : %d\n" % (self.min_band-1)
         s += "indexc : %d\n" % (self.indexc-1)
-        if self.expand:
-            s += "field_dirx: %10.6lf %10.6lf %10.6lf\n"%tuple(self.field_dirx)
-            s += "field_diry: %10.6lf %10.6lf %10.6lf\n"%tuple(self.field_diry)
-            s += "field_dirz: %10.6lf %10.6lf %10.6lf\n"%tuple(self.field_dirz)
+        s += "field_dirx: %10.6lf %10.6lf %10.6lf\n"%tuple(self.field_dirx)
+        s += "field_diry: %10.6lf %10.6lf %10.6lf\n"%tuple(self.field_diry)
+        s += "field_dirz: %10.6lf %10.6lf %10.6lf\n"%tuple(self.field_dirz)
         return s
 
 if __name__ == "__main__":

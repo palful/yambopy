@@ -69,43 +69,18 @@ def histogram_eiv(eiv,weights,emin=-5.0,emax=5.0,step=0.01,sigma=0.05,ctype='lor
             y += w*c/(x1+s2)
     return x, y
 
-def energy_gaps(eiv,nv,nc,GWshift=0.):
-    HOMO = np.max(eiv[:,nv-1])
-    LUMO = np.min(eiv[:,nv])
-    Egap = LUMO-HOMO
-    for k in eiv: 
-        if k[nv-1]==HOMO: LUMO_dir=k[nv]
-    Edir = LUMO_dir-HOMO
-    print('DFT Energy gap: %s eV'%Egap)
-    print('DFT Direct gap: %s eV'%Edir)
-    eiv[:,nv:]+=GWshift
-    print('GW shift:       %s eV'%GWshift)
-    return eiv
-
-def lorentzian(x,x0,g):
-    height=1./(np.pi*g)
-    return height*(g*g)/((x-x0)*(x-x0)+g*g)
-
-def gaussian(x,x0,s):
-    height=1./(np.sqrt(2.*np.pi)*s)
-    argument=-0.5*((x-x0)/s)**2
-    #Avoiding undeflow errors...
-    np.place(argument,argument<min_exp,min_exp)
-    return height*np.exp(argument)
-
-def IP_eps2(eiv,nv,nc,weights,dipoles,ntot_dip=-1,GWshift=0.,broad=0.01,broadtype='l',nbnds=[-1,-1],Emin=0.,Emax=10.,Esteps=50):
-    """Compute independent-particle absorption
-    eiv -> eigenvalues_ibz from YamboElectronsDB.
-    nv,nc -> nbandsv,nbandsc from YamboElectronsDB (i.e. from QE nscf calculation).
-    weights -> weights_ibz from YamboElectronsDB.
-    dipoles -> dipoles from YamboDipolesDB.
-    ntot_dip -> nbands from YamboDipolesDB (i.e. included in the YAMBO calculation).
-    GWshift -> rigid GW shift in eV.
-    broad -> broadening of peaks.
-    broadtype -> 'l' is lorentzian, 'g' is gaussian.
-    nbnds -> number of [valence, conduction] bands included starting from Fermi level. Default means all are included.
-    Emin,Emax,Esteps -> frequency range for the plot.
+class YamboElectronsDB():
     """
+    Class to read information about the electrons from the ``ns.db1`` produced by yambo
+    
+    Arguments:
+        
+        ``lattice``: instance of YamboLatticeDB or YamboSaveDB
+
+        ``filename``: netcdf database to read from (default:ns.db1)
+
+    """
+<<<<<<< HEAD
     freq = np.linspace(Emin,Emax,Esteps)
     #Cut bands to the maximum number used for the dipoles
     if ntot_dip>0: 
@@ -146,6 +121,8 @@ def IP_eps2(eiv,nv,nc,weights,dipoles,ntot_dip=-1,GWshift=0.,broad=0.01,broadtyp
     return freq,EPS2
 
 class YamboElectronsDB():
+=======
+>>>>>>> 1be25739b9598c876edcbbdd4e1552a6cc0f1388
     def __init__(self,lattice,save='SAVE',filename='ns.db1'):
         self.lattice = lattice
         self.filename = '%s/%s'%(save,filename)
@@ -293,6 +270,29 @@ class YamboElectronsDB():
         self.efermi = (top+bot)/2
         self.setFermi(self.efermi,broad)
     
+    def energy_gaps(self,GWshift=0.):
+        """
+        Calculate the enegy of the gap (by Fulvio Paleari)
+        """
+        eiv = self.eigenvalues
+        nv  = self.nbandsv
+        nc  = self.nbandsc   
+
+        homo = np.max(eiv[:,nv-1])
+        lumo = np.min(eiv[:,nv])
+        Egap = lumo-homo
+        for k in eiv: 
+            if k[nv-1]==homo:
+                lumo_dir=k[nv]
+        Edir = lumo_dir-homo
+        eiv[:,nv:]+=GWshift
+
+        print('DFT Energy gap: %s eV'%Egap)
+        print('DFT Direct gap: %s eV'%Edir)
+        print('GW shift:       %s eV'%GWshift)
+ 
+        return np.copy(eiv)
+
     def getFermi(self,invsmear,setfermi=True):
         """ 
         Determine the fermi energy

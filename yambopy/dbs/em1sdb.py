@@ -6,15 +6,9 @@
 from yambopy import *
 from yambopy.netcdf import *
 from subprocess import call
-<<<<<<< HEAD
 import sys
 
 def replace_serial(folder_to_replace, folder_to_get):
-    #
-=======
-
-def replace_serial(folder_to_replace, folder_to_get):
->>>>>>> 1be25739b9598c876edcbbdd4e1552a6cc0f1388
     # Replace serial number in screening database
     #
     # Find database with the serial number to get

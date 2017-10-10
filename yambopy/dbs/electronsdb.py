@@ -69,18 +69,8 @@ def histogram_eiv(eiv,weights,emin=-5.0,emax=5.0,step=0.01,sigma=0.05,ctype='lor
             y += w*c/(x1+s2)
     return x, y
 
-class YamboElectronsDB():
-    """
-    Class to read information about the electrons from the ``ns.db1`` produced by yambo
-    
-    Arguments:
-        
-        ``lattice``: instance of YamboLatticeDB or YamboSaveDB
-
-        ``filename``: netcdf database to read from (default:ns.db1)
-
-    """
-<<<<<<< HEAD
+## WHAT HAPPENED HERE??
+"""
     freq = np.linspace(Emin,Emax,Esteps)
     #Cut bands to the maximum number used for the dipoles
     if ntot_dip>0: 
@@ -119,10 +109,20 @@ class YamboElectronsDB():
     #Spin polarization and kpoint_ibz weights already sum to one
     EPS2 = EPS2/float(Pdir)
     return freq,EPS2
+"""
 
 class YamboElectronsDB():
-=======
->>>>>>> 1be25739b9598c876edcbbdd4e1552a6cc0f1388
+    """
+    Class to read information about the electrons from the ``ns.db1`` produced by yambo
+    
+    Arguments:
+        
+        ``lattice``: instance of YamboLatticeDB or YamboSaveDB
+
+        ``filename``: netcdf database to read from (default:ns.db1)
+
+    """
+
     def __init__(self,lattice,save='SAVE',filename='ns.db1'):
         self.lattice = lattice
         self.filename = '%s/%s'%(save,filename)

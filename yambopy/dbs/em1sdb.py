@@ -8,37 +8,29 @@ from yambopy.netcdf import *
 from subprocess import call
 import shutil
 
-def replace_serial(folder_to_replace, folder_to_get):
-    # Replace serial number in screening database
-    #
+def replace_serial(folder_to_replace, folder_to_get, which_one, where_to_get):
     # Find database with the serial number to get
     try:
-        db_to_get = Dataset('%s/ndb.em1s'%folder_to_get, 'r')
+        db_to_get = Dataset('%s/%s'%(folder_to_get,where_to_get), 'r')
     except:
-        try:
-            db_to_get = Dataset('%s/ndb.dip_iR_and_P'%folder_to_get, 'r')
-        except:
-            try:
-                db_to_get = Dataset('%s/ndb.gops'%folder_to_get, 'r')
-            except:
-                raise IOError("[ERROR] No serial number found at %s/"%folder_to_get)
+        raise IOError("[ERROR] No serial number found at %s/"%folder_to_get)
     #Get new serial number
     serial_to_get = db_to_get['SERIAL_NUMBER'][:]
     db_to_get.close()
     #Create safety copy of database to change
-    call(["cp","%s/ndb_em1s"%folder_to_replace,"%s/ndb_em1s_original"%folder_to_replace])
+    call(["cp","%s/%s"%(folder_to_replace,which_one),"%s/original_%s"%(folder_to_replace,which_one)])
     #Get database to change
-    db_to_replace = Dataset('%s/ndb.em1s'%folder_to_replace, 'r+')
+    db_to_replace = Dataset('%s/%s'%(folder_to_replace,which_one), 'r+')
     serial_to_replace = db_to_replace['SERIAL_NUMBER'][:]
     # Print info
-    print('[WARNING] Changing serial number of %s/ndb.em1s'%folder_to_replace)
+    print('[WARNING] Changing serial number of %s/%s'%(folder_to_replace,which_one))
     print('============================================')
     print('Old serial number: %s'%serial_to_replace)
     # Replace serial number
     db_to_replace['SERIAL_NUMBER'][:] = serial_to_get
     db_to_replace.close()
     #Reload database to check
-    db_to_check = Dataset('%s/ndb.em1s'%folder_to_replace, 'r')
+    db_to_check = Dataset('%s/%s'%(folder_to_replace,which_one), 'r')
     new_serial  = db_to_check['SERIAL_NUMBER'][:]
     db_to_check.close()
     print('New serial number: %s'%new_serial)

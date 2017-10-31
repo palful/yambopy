@@ -1,5 +1,5 @@
 #
-#
+# 1st version by Fulvio Paleari
 # This file is part of yambopy
 #
 import os
@@ -76,9 +76,10 @@ class supercell():
 #########################################
 #[START] Displacement-related functions #                           
 #########################################
-    def displace(self,modes_file,new_atoms,Temp=0.1,write=True):
+    def displace(self,modes_file,new_atoms,Temp=0.1,use_temp='no',write=True):
         #Case of displaced supercell
         print('Applying displacements according to phonon modes...')
+        self.use_temp = use_temp
         self.initialize_phonons(modes_file,self.atypes,Temp)
         phases = self.getPhases()                
         expand_eigs = np.array([phases[i]*self.eigs for i in range(self.sup_size)])
@@ -98,7 +99,6 @@ class supercell():
             else: mode='diagonal'
             self.modes_qe = [self.write(new_atoms,mode,phonon=disps_slice) for disps_slice in self.disps]
        
-
     def initialize_phonons(self,modes_file,atypes,Temp):
         #Read frequencies
         Omega = read_frequencies(modes_file)
@@ -136,32 +136,30 @@ class supercell():
                 eig[i]=-eig[i]
         return eig
 
-    def osc_length(self,eig,temperature=0.):
+    def osc_length(self,eig):
         """Oscillator lengths per mode (in ANGSTROM)
            NB:  For now, I can only set ARBITRARY displacements.
            NB2: Eigenmodes from quantum espresso are ALREADY weighted by atomic masses
         """
-        
-        RESCALE=b2a*self.Temp
+        RESCALE     = b2a*self.Temp  #Arbitrary displacement
+        temperature = self.Temp      #Harmonic displacement
         modes=3*self.basis
-        """mass_ratio = np.array([sqrt(Mp/mass) for mass in self.m_at])
-        """
         displacements=[]
         lengths_per_mode=[]
         for nu,eig_slice in enumerate(eig):
             l=sqrt(hbar/(2.*cMp*self.Omega[nu]))
             if temperature==0.: sigma2=l*l
             else: sigma2=l*l*(2./(np.exp(hbar*self.Omega[nu]/(kb*temperature))-1.)+1)
-            
-            #Each mode (i.e. atomic displacement directions) is multiplied by the corresponding length
-            displacements.append(RESCALE*eig_slice)
+            #
+            if self.use_temp=='no': displacements.append(RESCALE*eig_slice)     #Each mode (i.e. atomic displacement directions) is multiplied by the corresponding length
+            else:                   displacements.append(np.sqrt(sigma2)*eig_slice) #Displacement by harmonic sigma
             #List of average "realistic" atomic displacements (not weighted by atomic mass)
             lengths_per_mode.append(np.sqrt(sigma2))
         displacements = np.array(displacements)
         lengths_per_mode = np.array(lengths_per_mode)
         """
-        for d,i in product(range(len(displacements)),range(self.basis)):
-                displacements[d,i,:] *= mass_ratio[i] #Weigh the displ. with the different masses
+        mass_ratio = np.array([sqrt(Mp/mass) for mass in self.m_at])
+        for d,i in product(range(len(displacements)),range(self.basis)): displacements[d,i,:] *= mass_ratio[i] #Weigh the displ. with the different masses
         """
         #displacements[mode in order of ascending frequency][basis]
         return displacements

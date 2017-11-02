@@ -1,7 +1,5 @@
-#
-# Temporary class to fold static screening
-# (i.e. em1s / vX / chi) in supercells. 
-# Maybe it can be merged with em1s.py. 
+# 1st version by Fulvio Paleari
+# This file is part of yambopy
 #
 # This is the plan:
 # (1) 
@@ -10,8 +8,14 @@
 #           {Q+G1,Q+G2} to {q+g1,q+g2}: we have Q=q+g_Q, g1=g_Q+G1, g2=g_Q+G2.
 # (2) 
 #           This mapping works in the expanded BZ. This means we have to expand
-#           X_uc as well. Since for now I couldn't get it perfectly right, we
-#           just run the uc calculation in the full cell (noinv, nosym).
+#           X_uc as well. For now we have to run the uc calculation in the full 
+#           cell (noinv, nosym). I have to implement the transformation with the
+#           inverse transpose of the symmetry operators to make it work in the IBZ.
+# (3)
+#           The checks of matching between the (Q+G)- and (q+g)-grids are awful:
+#           inefficient and can totally fail. I need to find a smarter and more
+#           robust way to do that.
+#
 from yambopy import *
 from itertools import product
 import math
@@ -115,7 +119,7 @@ class fold_vX():
         else: print('Ok')   
         #      
     def get_Qqg(self,thr=1e-6):
-        #[iv] Get the {Q,q,g_Q} index list [N^3 loop. I guess this could be fixed]
+        #[iv] Get the {Q,q,g_Q} index list [N^3 loop. I guess this could be improved?]
         qtemp = np.array( [[Q-q for q in self.sqpts] for Q in self.qpts] )
         Qqg_list = []
         for i,Q in enumerate(qtemp):

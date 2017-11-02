@@ -49,7 +49,7 @@ class YamboGreenDB():
             self.qp_dict[(b1,b2,kindex)] = nqp
 
         #read QP_kpts
-        kpts = database['QP_kpts'][:].T
+        kpts = database.variables['QP_kpts'][:].T
         self.qpoints = kpts.shape
 
     def plot(self,ax,kpt=0,band=0,what='SE',e0=None,**kwargs):
@@ -106,7 +106,6 @@ class YamboGreenDB():
         qp.variables['QP_E_Eo_Z'][1,:,0] = self.eqp.imag
         qp.variables['QP_E_Eo_Z'][0,:,2] = self.z.real
         qp.variables['QP_E_Eo_Z'][1,:,2] = self.z.imag
-        print('lololol')
         #write 
         qp.close()
 

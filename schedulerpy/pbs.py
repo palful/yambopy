@@ -39,7 +39,7 @@ class Pbs(Scheduler):
 
         if rerunable: args.append("-r y")
 
-        if mem: args.append("-l pvmem=%dMB"%mem)
+        if self.get_arg("pvmem"): args.append("-l pvmem=%dMB"%mem)
         
         resources_line = self.get_resources_line()
         if resources_line:
@@ -83,7 +83,7 @@ class Pbs(Scheduler):
             mem = mem.replace("nodes",str(nodes))
             mem = mem.replace("cores",str(cores))
             mem = eval_expr(mem) 
-        return     
+        return mem 
 
     def get_resources_line(self):
         """
@@ -99,7 +99,7 @@ class Pbs(Scheduler):
 
         # memory stuff
         mem = self.get_mem()
-        if mem: resources["vmem"]  = "%dMB"%mem
+        if mem: resources["mem"]  = "%dMB"%mem
         
         resources_line = ":".join(["%s=%s"%(item,value) for item,value in resources.items()])
        

@@ -4,6 +4,9 @@
 # This file is part of yambopy
 #
 #
+import sys
+if sys.version_info.major > 2:
+    from past.builtins import basestring
 from yambopy import *
 import os
 import json
@@ -38,23 +41,26 @@ class YamboAnalyser():
     def get_data(self,tags):
         """ Get a dictionary with all the data from the files under analysis
         """
-        if type(tags) is str:
+        if isinstance(tags,basestring):
             tags=(tags,)
         data = dict()
         for k in sorted(self.jsonfiles.keys()):
             for filename in self.jsonfiles[k]["data"].keys():
-                if all(i in filename for i in tags):
+                if any(i in filename for i in tags):
                     data[k] = np.array( self.jsonfiles[k]["data"][filename] )
         return data
 
     def get_tags(self,tags):
         """ Get a dictionary with the tags of the output file colomns
         """
+        if isinstance(tags,basestring):
+            tags=(tags,)
         tagslist = dict()
         for k in sorted(self.jsonfiles.keys()):
             for filename in self.jsonfiles[k]["tags"].keys():
-                if all(i in filename for i in tags):
+                if any(i in filename for i in tags):
                     tagslist[k] = np.array( self.jsonfiles[k]["tags"][filename] )
+
         return tagslist
 
     def get_colors(self,tags):
@@ -79,7 +85,7 @@ class YamboAnalyser():
         sym_car  = np.array(jsonfile['sym_car'])
         alat     = np.array(jsonfile['alat'])
         lattice  = np.array(jsonfile['lattice'])
-        
+
         #check if the lattice data is present
         if not lattice.any():
             print('Information about the lattice is not present, cannot determine the path')
@@ -138,7 +144,7 @@ class YamboAnalyser():
         Create a path of k-points and find the points in the regular mesh that correspond to points in the path
         Use these points to plot the GW band structure.
         """
-        if type(tags) == str: tags = (tags,)
+        if isinstance(tags,basestring): tags = (tags,)
         path = np.array([p[0] for p in path_label])
         labels = [p[1] for p in path_label]
         plot = False
@@ -201,10 +207,46 @@ class YamboAnalyser():
             else:
                 plt.savefig('gw.png')
 
+    def get_gw_path_bands(self,tags,path_label,cols=(lambda x: x[2]+x[3],),rows=None):
+
+        """ Get the bands a path of k-points and find the points in the regular mesh that correspond to points in the path
+        """
+        path = np.array([p[0] for p in path_label])
+
+        #select one of the files to obtain the points in the path
+        json_filename = self.jsonfiles.keys()[0]
+
+        #find the points along the high symmetry lines
+        json_filename = self.jsonfiles.keys()[0]
+        bands_kpoints, bands_indexes, bands_highsym_qpts = self.get_path(path,json_filename)
+
+        #calculate distances
+        bands_distances = [0]
+        distance = 0
+        for nk in range(1,len(bands_kpoints)):
+            distance += np.linalg.norm(bands_kpoints[nk-1]-bands_kpoints[nk])
+            bands_distances.append(distance)
+
+
+        #obtain the bands for the output files and plot
+        for json_filename in self.jsonfiles.keys():
+            for output_filename in self.jsonfiles[json_filename]['data']:
+                kpoint_index, bands_cols = self.get_gw_bands(json_filename,output_filename,cols=cols,rows=rows)
+
+                # Pass path and bands in arrays
+                band_in_path = []
+                for ib,bands in enumerate(bands_cols):
+                    band_aux = []
+                    for band in bands:
+                        band_aux.append([band[k] for k in bands_indexes])
+                    band_in_path.append(band_aux)
+
+        return bands_distances, band_in_path
+
     def get_gw_bands(self,json_filename,output_filename,cols=(lambda x: x[2]+x[3],),rows=None):
         """
         Get the gw bands from a gw calculation from a filename
-        
+
         Arguments:
             json_filename: the name of the json file
             output_filename: the name of the output filename that is in the json file
@@ -241,8 +283,8 @@ class YamboAnalyser():
         return kpoint_index, bands_cols
 
     def plot_qp_correction(self,tags=('qp',),lda=2,qp=3):
-        
-        if type(tags) == str: tags = (tags,)
+
+        if isinstance(tags,basestring): tags = (tags,)
 
         ax = plt.axes([0.1, 0.1, .7, .7])
         for json_filename in sorted(self.jsonfiles.keys()):
@@ -283,7 +325,7 @@ class YamboAnalyser():
         fig = plt.figure()
         ax = plt.subplot(111)
         colors = self.get_colors(tags)
-        if type(tags) == str: tags = (tags,)
+        if isinstance(tags,basestring): tags = (tags,)
 
         n=0
         for json_filename in sorted(self.jsonfiles.keys()):
@@ -310,7 +352,7 @@ class YamboAnalyser():
             plt.show()
 
     def plot_bse(self,tags,cols=(2,),ax=None):
-        """ 
+        """
         Use this function to plot the absorption spectrum calculated using the BSE
         cols: a list of indexes to select which columns from the file to plot
 
@@ -354,7 +396,7 @@ class YamboAnalyser():
         return ax
 
     def plot_spectral_function(self,tags):
-        if type(tags) == str:
+        if isinstance(tags,basestring):
             tags = (tags,)
         ax = plt.axes([0.1, 0.1, .7, .7])
         for json_filename in sorted(self.jsonfiles.keys()):
@@ -383,7 +425,7 @@ class YamboAnalyser():
         The tags are both for variables in the input file and arguments (meaning runlevels)
         """
         #check if a string was passed and in that case we make it a tuple
-        if type(tags) == str:
+        if isinstance(tags,basestring):
             tags = (tags,)
 
         inputfiles = self.get_inputfiles()

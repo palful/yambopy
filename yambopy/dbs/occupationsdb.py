@@ -45,10 +45,9 @@ class YamboOccupationsDB():
         db_occ.close()
 
     def get_trimmed_data(self):
+        #The pumped band energies and occupations are arranged along [ik,ib]
         self.eigs   = np.array( [[self.electrons.eigenvalues_ibz[ik,band-1] for band in self.bands ] for ik in range(self.nkpoints) ] )
-        self.nk_occ = np.array( [[self.occ[ik*self.nbands+ib] for ib in range(self.bands) ] for ik in range(self.nkpoints) ] )
-        print self.eigs
-        print self.nk_occ
+        self.nk_occ = np.array( [[self.occ[ik*self.nbands+ib] for ib in range(self.nbands) ] for ik in range(self.nkpoints) ] )
 
     def __str__(self):
         s =  ""

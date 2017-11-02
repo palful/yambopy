@@ -21,7 +21,7 @@ Modules:
         - YamboElectronsDB: read the electronic states from ns.db1
         - YamboQPDB: read the quasiparticle energies db ndb.QP
         - YamboGreenDB: read the green's functions calculated using yambo
-        - YamboOccupationsDB: read the carrier occupations from a pumped system
+        - YamboRTDB: read the carrier occupations from a pumped system
 
     bse
         - YamboExcitonWaveFunctionXSF: read the excitonic
@@ -52,7 +52,6 @@ from yambopy.dbs.rtdb import *
 from yambopy.dbs.excitondb import *
 from yambopy.dbs.wfdb import *
 from yambopy.dbs.elphondb import *
-from yambopy.dbs.occupationsdb import *
 
 #input/output files
 from yambopy.io.inputfile import *

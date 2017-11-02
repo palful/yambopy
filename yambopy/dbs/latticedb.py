@@ -128,8 +128,8 @@ class YamboLatticeDB():
         """
         nks  = range(self.nkpoints)
         kpts = self.car_kpoints
-        print nks
-        print kpts
+        #print nks
+        #print kpts
 
         #points in cartesian coordinates
         path_car = red_car(path, self.rlat)

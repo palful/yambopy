@@ -1,5 +1,6 @@
 # Copyright (c) 2017, Henrique Miranda
 # All rights reserved.
+# Fulvio Paleari: I modified a couple of things to avoid some numerical issues
 #
 # This file is part of the yambopy project
 #

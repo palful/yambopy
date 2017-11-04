@@ -105,8 +105,8 @@ class YamboRTDB():
         distance = []
         distance.append(0.)
         for ik in range(1,self.how_many):
-            start_car = ibz_car[self.indices[ik-1]]
-            end_car   = ibz_car[self.indices[ik]]
+            start_car = abs(ibz_car[self.indices[ik-1]])
+            end_car   = abs(ibz_car[self.indices[ik]])
             distance.append(distance[ik-1]+np.linalg.norm(end_car-start_car))
         self.distance = np.array(distance)
     
@@ -125,13 +125,16 @@ class YamboRTDB():
             list_to_plot.append(np.concatenate((x_axis,eigs_to_plt,occs_to_plt[tstep]),axis=1))    
             #Print a plottable data file (i.e. gnuplot,matplotlib)
             if plot=='matplotlib':
-                np.savetxt('bnds_occs_time_%s_mpl.dat'%str(tstep),list_to_plot[tstep],fmt='%4.5f',header='x\t#index\t#bands: %d cols\t#occupations: %d cols'%(self.nbands,self.nbands))
+                np.savetxt('bnds_occs_time_%s_mpl.dat'%str(tstep),list_to_plot[tstep],fmt='%4.5f',header='x\t\t#index\t\t#bands: %d cols\t\t#occupations: %d cols'%(self.nbands,self.nbands))
             if plot=='gnuplot':
+                open('bnds_occs_time_%s_gnu.dat'%str(tstep),'w').close()
                 f = open('bnds_occs_time_%s_gnu.dat'%str(tstep),'a')
-                for ib in range(self.nbands):
-                    np.savetxt('bnds_occs_time_%s_gnu.dat'%str(tstep),
-                                (list_to_plot[tstep][0],list_to_plot[tstep][1],list_to_plot[tstep][2+ib],list_to_plot[tstep][2+self.nbands+ib]),
-                                fmt='%4.5f',header='x\t#index\t#band\t#occupations')
+                f.write('#x\t\t#index\t\t#band\t\t#occupations\n')
+                for ib in range(self.nbands):   
+                    format_to_print = np.transpose([ list_to_plot[tstep][:,0],list_to_plot[tstep][:,1],list_to_plot[tstep][:,2+ib],list_to_plot[tstep][:,2+self.nbands+ib] ])
+                    np.savetxt(f,format_to_print,fmt='%4.5f')
+                    #np.savetxt(f,list_to_plot[tstep][:,0],fmt='%4.5f')
+                    f.write('\n')
                 f.close()
 
     def __str__(self):

@@ -1,4 +1,4 @@
-# Copyright (c) 2015, Henrique Miranda
+# Copyright (c) 2017, Alejandro Molina-Sanchez
 # All rights reserved.
 #
 # This file is part of the yambopy project
@@ -7,9 +7,9 @@ from yambopy import *
 from yambopy.plot  import *
 import os
 
-class YamboBSEAbsorptionSpectra(YamboSaveDB):
+class YamboRTMovie(YamboSaveDB):
     """
-    Create a file with information about the excitons from Yambo files
+    Create a file with data of real time simulations performed with Yambo
     """
     def __init__(self,job_string,path='.'):
         """
@@ -26,43 +26,46 @@ class YamboBSEAbsorptionSpectra(YamboSaveDB):
         YamboSaveDB.__init__(self,save=self.save)
 
         self.job_string = job_string
-        self.data = {"excitons":[],
-                     "lattice": self.lat,
+        self.data = {"lattice": self.lat,
                      "atypes": self.atomic_numbers,
                      "atoms": self.atomic_positions}
 
         self.atoms = None
         self.excitons = None
  
-        #use YamboOut to read the absorption spectra
+        #use YamboOut to read the polarization-time
         self.path = path
 
         #try to find o-* files in path, if not use path/job_string
         paths = [path, "%s/%s"%(path,job_string)]
         for p in paths:
             y = YamboOut(p,save_folder=path)
-            absorptionspectra = y.get_data(('eps','diago'))
+            polarization = y.get_data(('polarization'))
+            carriers     = y.get_data(('carriers')) 
+            external     = y.get_data(('external')) 
             #if we read the files then continue
-            if absorptionspectra != {}:
+            if polarization != {}:
                 break
 
         #trap the errors here
-        if absorptionspectra == {}:
-            raise ValueError('Could not find the o-*diago*eps files in %s. Make sure you diagonalized the BSE hamiltonian in yambo.'%paths)
+        if polarization == {}:
+            raise ValueError('Could not find the o-*polarization files in %s'%paths)
+        if carriers == {}:
+            raise ValueError('Could not find the o-*carriers files in %s'%paths)
 
         #we just use one of them
-        key = list(absorptionspectra)[0]
-        for key,value in absorptionspectra[key].items():
+        key = list(polarization)[0]
+        for key,value in polarization[key].items():
             self.data[key] = value
+        key = list(carriers)[0]
+        for key,value in carriers[key].items():
+            self.data[key] = value
+        key = list(external)[0]
+        for key,value in external[key].items():
+            self.data[key] = value
+        print self.data
 
     def get_excitons(self,min_intensity=0.1,max_energy=4,Degen_Step=0.0):
-        """ 
-        Obtain the excitons using ypp
-        Parameters:
-            min_intensity - Only plot excitons with intensity larger than this value (default: 0.1)
-            max_energy    - Only plot excitons with energy below this value (default: 4 eV)
-            Degen_Step    - Only plot excitons whose energy is different by more that this value (default: 0.0)
-        """
         filename = "%s/o-%s.exc_E_sorted"%(self.path,self.job_string)
         if not os.path.isfile(filename):
             os.system("cd %s; ypp -e s -J %s"%(self.path,self.job_string))
@@ -232,7 +235,7 @@ class YamboBSEAbsorptionSpectra(YamboSaveDB):
 
             self.data["excitons"].append(exciton)
 
-    def write_json(self,filename="absorptionspectra"):
+    def write_json(self,filename="dynamics"):
         """ Write a jsonfile with the absorption spectra and the wavefunctions of certain excitons
         """
         print "writing json file...",

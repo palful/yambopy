@@ -8,7 +8,7 @@ from yambopy import *
 import os
 
 #
-# by Henrique Miranda
+# by Henrique Miranda. 
 #
 def pack_files_in_folder(folder,save_folder=None,mask='',verbose=True):
     """
@@ -23,7 +23,28 @@ def pack_files_in_folder(folder,save_folder=None,mask='',verbose=True):
             if ([ f for f in filenames if 'o-' in f ]):
                 print dirpath
                 y = YamboOut(dirpath,save_folder=save_folder)
-                y.pack()
+                if os.path.exists('%s/ndb.QP' % dirpath):
+                  y.pack_from_netcdf()
+                else:
+                  y.pack()
+#
+# Developing version for packing many netcdf files. Alejandro Molina-Sanchez. 
+#
+
+def pack_netcdf_files_in_folder(folder,save_folder=None,mask='',verbose=True):
+    """
+    Pack the netcdf files in a folder to json files
+    """
+    if not save_folder: save_folder = folder
+    #pack the files in .json files
+    for dirpath,dirnames,filenames in os.walk(folder):
+        #check if the folder fits the mask
+        if mask in dirpath:
+            #check if there are some output files in the folder
+            if ([ f for f in filenames if 'o-' in f ]):
+                print dirpath
+                y = YamboOut(dirpath,save_folder=save_folder)
+                y.pack_from_netcdf()
 
 #
 # by Alejandro Molina-Sanchez
@@ -78,9 +99,9 @@ def analyse_gw(folder,var,bandc,kpointc,bandv,kpointv,pack,text,draw):
     data = YamboAnalyser(folder)
 
     # extract data according to relevant variable
-    outvars = data.get_data(var)
+    outvars = data.get_data(tags=(var,'reference'))
     invars = data.get_inputfiles_tag(var)
-    tags = data.get_tags(var)
+    tags = data.get_tags(tags=(var,'reference'))
 
     # Get only files related to the convergence study of the variable,
     # ordered to have a smooth plot
@@ -91,7 +112,11 @@ def analyse_gw(folder,var,bandc,kpointc,bandv,kpointv,pack,text,draw):
         key=sorted_invars[i][0]
         if key.startswith(var) or key=='reference.json':
             keys.append(key)
-    print 'Files detected: ',keys
+
+    if len(keys) == 0: raise ValueError('No files with this variable were found')
+    print 'Files detected:'
+    for key in keys:
+        print key
 
     print 'Computing values...'
     ### Output
@@ -100,12 +125,11 @@ def analyse_gw(folder,var,bandc,kpointc,bandv,kpointv,pack,text,draw):
     unit = invars[keys[0]]['variables'][var][1]
 
     # The following variables are used to make the script compatible with both short and extended output
-    kpindex = tags[keys[0]].tolist().index('K-point')
+    #kpindex = tags[keys[0]].tolist().index('K-point')
+    kpindex = tags[keys[0]].tolist().index('Kpoint_index') # netcdf from json
     bdindex = tags[keys[0]].tolist().index('Band')
     e0index = tags[keys[0]].tolist().index('Eo')
     gwindex = tags[keys[0]].tolist().index('E-Eo')
-
-
     array = np.zeros((len(keys),2))
 
     for i,key in enumerate(keys):
@@ -123,7 +147,7 @@ def analyse_gw(folder,var,bandc,kpointc,bandv,kpointv,pack,text,draw):
         conduction=[]
         for j in range(len(outvars[key]+1)):
             if outvars[key][j][kpindex]==kpointc and outvars[key][j][bdindex]==bandc:
-                    conduction=outvars[key][j]
+               conduction=outvars[key][j]
             elif outvars[key][j][kpindex]==kpointv and outvars[key][j][bdindex]==bandv:
                     valence = outvars[key][j]
         # Then the gap can be calculated
@@ -197,6 +221,8 @@ def analyse_bse(folder,var,numbexc,intexc,degenexc,maxexc,pack,text,draw):
         key=sorted_invars[i][0]
         if key.startswith(var) or key=='reference.json':
             keys.append(key)
+
+    if len(keys) == 0: raise ValueError('No files with this variable were found')
     print 'Files detected:'
     for key in keys:
         print key
@@ -225,7 +251,7 @@ def analyse_bse(folder,var,numbexc,intexc,degenexc,maxexc,pack,text,draw):
             inp = v[1]
         else:
             inp = v
-           
+
         print 'Preparing JSON file. Calling ypp if necessary.'
         ### Creating the 'absorptionspectra.json' file
         # It will contain the exciton energies
@@ -275,7 +301,7 @@ def analyse_bse(folder,var,numbexc,intexc,degenexc,maxexc,pack,text,draw):
         filename = outname+'_excitons.dat'
         np.savetxt(filename,excitons,header=header)
         print filename
-        
+
         ## Spectra
         filename = outname+'_spectra.dat'
         f = open(filename,'w')
@@ -312,7 +338,7 @@ def analyse_bse(folder,var,numbexc,intexc,degenexc,maxexc,pack,text,draw):
         fig = plt.figure(figsize=(6,5))
         matplotlib.rcParams.update({'font.size': 15})
         for spectra in spectras:
-            plt.plot(spectra['x'],spectra['y'],label=spectra['label']) 
+            plt.plot(spectra['x'],spectra['y'],label=spectra['label'])
         plt.xlabel('$\omega$ (eV)')
         plt.ylabel('Im($\epsilon_M$)')
         plt.legend(frameon=False)
@@ -325,7 +351,7 @@ def analyse_bse(folder,var,numbexc,intexc,degenexc,maxexc,pack,text,draw):
         print '-nd flag : no plot produced.'
 
     print 'Done.'
-    
+
     return excitons, spectras
 
 #
@@ -369,8 +395,9 @@ def merge_qp(output,files,verbose=False):
     QP_E_E0_Z_save = np.concatenate(QP_E_E0_Z,axis=1)
 
     #create reference file from one of the files
+    netcdf_format = datasets[0].data_model
     fin  = datasets[0]
-    fout = Dataset(output,'w')
+    fout = Dataset(output,'w',format=netcdf_format)
 
     variables_update = ['QP_table', 'QP_kpts', 'QP_E_Eo_Z']
     variables_save   = [QP_table_save.T, QP_kpts_save.T, QP_E_E0_Z_save]
@@ -497,11 +524,11 @@ def plot_excitons(filename,cut=0.2,size=20):
         ax.yaxis.set_major_locator(plt.NullLocator())
         ax.xaxis.set_major_locator(plt.NullLocator())
         ax.set_aspect('equal')
-    
+
     plt.subplots_adjust(left=None, bottom=None, right=None, top=None, wspace=0.01, hspace=0.01)
 
     #remove extension from file
-    figure_filename = os.path.splitext(filename)
+    figure_filename = os.path.splitext(filename)[0]
     plt.savefig('%s.png'%figure_filename)
     if 'DISPLAY' in os.environ:
         plt.show()

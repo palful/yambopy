@@ -67,8 +67,8 @@ class YamboStaticScreeningDB():
                 if os.path.isfile(filename):
                     break
             database = Dataset(filename, 'r')
-            self.alat = database['LATTICE_PARAMETER'][:]
-            self.lat  = database['LATTICE_VECTORS'][:].T
+            self.alat = database.variables['LATTICE_PARAMETER'][:]
+            self.lat  = database.variables['LATTICE_VECTORS'][:].T
             self.volume = np.linalg.det(self.lat)
         except:
             raise IOError("Error opening %s in YamboStaticScreeningDB"%filename)
@@ -80,23 +80,23 @@ class YamboStaticScreeningDB():
             raise IOError("Error opening %s/%s in YamboStaticScreeningDB"%(self.save,self.filename))
 
         #read some parameters
-        size,nbands,eh = database['X_PARS_1'][:3]
+        size,nbands,eh = database.variables['X_PARS_1'][:3]
         self.size = int(size)
         self.nbands = int(nbands)
         self.eh = eh
 
         #read gvectors
-        gvectors = np.rint(database['X_RL_vecs'][:].T)
+        gvectors = np.rint(database.variables['X_RL_vecs'][:].T)
         self.gvectors = np.array([g/self.alat  for g in gvectors])
         self.ngvectors = len(self.gvectors)
         
         #read q-points
-        qpoints = database['HEAD_QPT'][:].T
+        qpoints = database.variables['HEAD_QPT'][:].T
         self.qpoints = np.array([q/self.alat  for q in qpoints])
         self.nqpoints = len(self.qpoints)
         
         #are we usign coulomb cutoff?
-        self.cutoff = "".join(database['CUTOFF'][:][0]).strip()
+        self.cutoff = "".join(database.variables['CUTOFF'][:][0]).strip()
         
         self.readDBs()
 
@@ -112,16 +112,22 @@ class YamboStaticScreeningDB():
             #open database for each k-point
             filename = "%s/%s_fragment_%d"%(self.save,self.filename,nq+1)
             try:
-                db = Dataset(filename)
-
-                #static screening means we have only one frequency
-                re, im = db['X_Q_%d'%(nq+1)][0,:]
-                self.X[nq] = re + 1j*im
-     
-                #close database
-                db.close()
+                database = Dataset(filename)
             except:
                 print "warning: failed to read %s"%filename
+
+
+            #static screening means we have only one frequency
+            # this try except is because the way this is sotored has changed in yambo
+            try:
+                re, im = database.variables['X_Q_%d'%(nq+1)][0,:]
+            except:
+                re, im = database.variables['X_Q_%d'%(nq+1)][0,:].T
+
+            self.X[nq] = re + 1j*im
+         
+            #close database
+            db.close()
 
     def saveDBS(self,path):
         """
@@ -142,9 +148,9 @@ class YamboStaticScreeningDB():
         X = self.X
         for nq in xrange(self.nqpoints):
             fname = "%s_fragment_%d"%(filename,nq+1)
-            db = Dataset("%s/%s"%(path,fname),'r+')
-            db['X_Q_%d'%(nq+1)][0,0,:] = X[nq].real
-            db['X_Q_%d'%(nq+1)][0,1,:] = X[nq].imag
+            database = Dataset("%s/%s"%(path,fname),'r+')
+            database.variables['X_Q_%d'%(nq+1)][0,0,:] = X[nq].real
+            database.variables['X_Q_%d'%(nq+1)][0,1,:] = X[nq].imag
             db.close()
 
     def writetxt(self,filename='em1s.dat',ng1=0,ng2=0,volume=False):
@@ -179,7 +185,7 @@ class YamboStaticScreeningDB():
             volume   -> Normalize with the volume of the cell
         """
         x = [np.linalg.norm(q) for q in self.qpoints]
-        y = [np.linalg.inv(1+xq)[0,0] for xq in self.X ]
+        y = [np.linalg.inv(np.eye(self.ngvectors)+xq)[0,0] for xq in self.X ]
       
         #order according to the distance
         x, y = zip(*sorted(zip(x, y)))
@@ -224,7 +230,7 @@ class YamboStaticScreeningDB():
         func -> Function to apply to the dielectric function
         """
 
-        #get vX
+        #get vX_{00}
         x,vX = self._getvxq(volume=volume)
     
         #when plotting we apply a funciton to epsilon to represent it, by default the |x|

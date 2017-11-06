@@ -44,3 +44,5 @@ branches:
   only:
     - master
     - travis
+    - devel
+    - netcdf

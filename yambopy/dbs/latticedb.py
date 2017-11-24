@@ -229,4 +229,3 @@ class YamboLatticeDB():
         return bands_kpoints, bands_indexes, path_car
 
 
->>>>>>> devel

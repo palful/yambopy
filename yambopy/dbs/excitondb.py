@@ -26,13 +26,13 @@ class YamboExcitonDB(YamboSaveDB):
         except:
             print "failed to read database %s"%filename
             exit(1)
-        if 'BS_left_Residuals' in db.variables.keys():
+        if 'BS_left_Residuals' in database.variables.keys():
             #residuals
             rel,iml = database.variables['BS_left_Residuals'][:].T
             rer,imr = database.variables['BS_right_Residuals'][:].T
             self.l_residual = rel+iml*I
             self.r_residual = rer+imr*I
-        if 'BS_Residuals' in db.variables.keys():
+        if 'BS_Residuals' in database.variables.keys():
             #residuals
             rel,iml,rer,imr = database.variables['BS_Residuals'][:].T
             self.l_residual = rel+iml*I
@@ -70,7 +70,7 @@ class YamboExcitonDB(YamboSaveDB):
         self.transitions_v_to_c = transitions_v_to_c 
         self.nexcitons    = len(self.eigenvalues)
         self.ntransitions = len(self.table)
-        db.close()
+        database.close()
    
     def write_sorted(self,prefix='yambo'):
         """
@@ -114,7 +114,7 @@ class YamboExcitonDB(YamboSaveDB):
         """
         get the intensities of the excitons
         """
-        intensities = abs2(self.l_residual*self.r_residual)
+        intensities = (self.l_residual*self.r_residual).real
         intensities /= np.max(intensities)
         return intensities
 

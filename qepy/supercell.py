@@ -22,6 +22,7 @@ cMp=Mp*1.660539*6.241509e-29 # Conversion of Mp in eV*\AA^{-2}*s^2
 #
 ## ISSUES TO FIX ##
 """(iii) Small issue in nondiagonal supercell matrices for certain q-vectors
+   (iv)  In nondiagonal supercells: the suggested kpoint mesh must be CONSISTENT and UNIFORM --> to fix
 """
 ## These two functions read phonons from qe output
 def read_frequencies(modes_file,units='Tera'):

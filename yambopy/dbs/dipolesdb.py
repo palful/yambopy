@@ -94,9 +94,9 @@ class YamboDipolesDB():
         database = Dataset(filename)
         tag1 = 'DIP_iR_k_0001_spin_0001'
         tag2 = 'DIP_iR_k_0001_xyz_0001_spin_0001'
-        if tag1 in db.variables.keys():
+        if tag1 in database.variables.keys():
             dipoles_format = 1
-        elif tag2 in db.variables.keys():
+        elif tag2 in database.variables.keys():
             dipoles_format = 2
         db.close()
         

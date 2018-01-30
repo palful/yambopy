@@ -26,51 +26,56 @@ class YamboExcitonDB(YamboSaveDB):
         except:
             print "failed to read database %s"%filename
             exit(1)
-        if 'BS_left_Residuals' in db.variables.keys():
+        if 'BS_left_Residuals' in database.variables.keys():
             #residuals
             rel,iml = database.variables['BS_left_Residuals'][:].T
             rer,imr = database.variables['BS_right_Residuals'][:].T
             self.l_residual = rel+iml*I
             self.r_residual = rer+imr*I
-        if 'BS_Residuals' in db.variables.keys():
+        if 'BS_Residuals' in database.variables.keys():
             #residuals
             rel,iml,rer,imr = database.variables['BS_Residuals'][:].T
             self.l_residual = rel+iml*I
             self.r_residual = rer+imr*I
+
         #energies
         eig =  database.variables['BS_Energies'][:]*ha2ev
         self.eigenvalues = eig[:,0]+eig[:,1]*I
-        #eigenvectors
-        eiv = database.variables['BS_EIGENSTATES'][:]
-        eiv = eiv[:,:,0] + eiv[:,:,1]*I
-        self.eigenvectors = eiv
-        #indexes
-        self.table = database.variables['BS_TABLE'][:].T.astype(int)
-
-        #transitions dictionary
-        #bs table k, v, c
-        self.unique_vbands = np.unique(self.table[:,1]-1)
-        self.unique_cbands = np.unique(self.table[:,2]-1)
-
-        #initialize empty dictionary
-        transitions_v_to_c = dict([ ((v,c),[]) for v,c in product(self.unique_vbands,self.unique_cbands) ])
-
-        #add elements to dictionary
-        for eh,kvc in enumerate(self.table-1):
-            k,v,c = kvc 
-            transitions_v_to_c[(v,c)].append((k,eh))
-
-        #make an array 
-        for t,v in transitions_v_to_c.items():
-            if len(np.array(v)):
-                transitions_v_to_c[t] = np.array(v)
-            else:
-                del transitions_v_to_c[t]
-
-        self.transitions_v_to_c = transitions_v_to_c 
         self.nexcitons    = len(self.eigenvalues)
-        self.ntransitions = len(self.table)
-        db.close()
+
+        if 'BS_EIGENSTATES' in database.variables.keys():
+            #eigenvectors
+            eiv = database.variables['BS_EIGENSTATES'][:]
+            eiv = eiv[:,:,0] + eiv[:,:,1]*I
+            self.eigenvectors = eiv
+        if 'BS_TABLE' in database.variables.keys():
+            #indexes
+            self.table = database.variables['BS_TABLE'][:].T.astype(int)
+
+            #transitions dictionary
+            #bs table k, v, c
+            self.unique_vbands = np.unique(self.table[:,1]-1)
+            self.unique_cbands = np.unique(self.table[:,2]-1)
+
+            #initialize empty dictionary
+            transitions_v_to_c = dict([ ((v,c),[]) for v,c in product(self.unique_vbands,self.unique_cbands) ])
+
+            #add elements to dictionary
+            for eh,kvc in enumerate(self.table-1):
+                k,v,c = kvc 
+                transitions_v_to_c[(v,c)].append((k,eh))
+
+            #make an array 
+            for t,v in transitions_v_to_c.items():
+                if len(np.array(v)):
+                    transitions_v_to_c[t] = np.array(v)
+                else:
+                    del transitions_v_to_c[t]
+
+            self.transitions_v_to_c = transitions_v_to_c 
+            self.ntransitions = len(self.table)
+
+        database.close()
    
     def write_sorted(self,prefix='yambo'):
         """
@@ -279,21 +284,28 @@ class YamboExcitonDB(YamboSaveDB):
 
         return car_kpoints, amplitudes[kindx], np.angle(phases)[kindx]
 
-    def chi(self,dipoles=None,dir=0,emin=0,emax=8,estep=0.01,broad=0.1,nexcitons='all'):
+    def get_eps(self,dipoles=None,dir=0,emin=0,emax=8,esteps=100,broad=0.1,nexcitons='all'):
         """
-        Calculate the dielectric response function using excitonic states
+        Calculate the macroscopic complex dielectric function eps
+        We use the excitonic response function (vX)_reduced for insulators
+        In this case after kernel inversion we have eps=1-(vX)_reduced 
+        [cfr. IP case in dipolesdb where there is no inversion]
+        However because of yambo units the final formula will be with plus:
+        eps(w) = 1+lim{q->0}v(q)X_reduced(q,w)
+        Yambo test --> yambo -o b and BSSmod = "retarded / causal"
+        
+        emin,emax,esteps,broad --> energy range and broadening in eV
         """
         if nexcitons == 'all': nexcitons = self.nexcitons
 
         #energy range
-        w = np.arange(emin,emax,estep,dtype=np.float32)
-        nenergies = len(w)
+        w = np.linspace(emin,emax,esteps,dtype=np.float32)
         
-        print "energy range: %lf -> +%lf -> %lf "%(emin,estep,emax)
-        print "energy steps: %lf"%nenergies
+        print "energy range: %lf -> %lf "%(emin,emax)
+        print "energy steps: %d"%esteps
 
         #initialize the susceptibility intensity
-        chi = np.zeros([len(w)],dtype=np.complex64)
+        chi_r = np.zeros([len(w)],dtype=np.complex128)
 
         if dipoles is None:
             #get dipole
@@ -304,20 +316,34 @@ class YamboExcitonDB(YamboSaveDB):
             print "calculate exciton-light coupling"
             EL1,EL2 = self.project1(dipoles.dipoles[:,dir],nexcitons) 
 
+        #set up some variables and dimensions we need
+        q0_norm = 1e-05
+        spin=2 # For now we assume spin-unpolarised materials
+        D_vol = self.lattice.D_vol_au # We need the uc volume
+        nk = self.lattice.nkpoints_full
 
         #iterate over the excitonic states
         for s in xrange(nexcitons):
             #get exciton energy
             es = self.eigenvalues[s]
- 
-            #calculate the green's functions
-            G1 = 1/(   w - es - broad*I) 
-            G2 = 1/( - w - es - broad*I)
+            
+            G1 = -1./(w          -es  + broad*I) # Resonant term
+            G2 =  1./(w + np.conj(es) + broad*I) # Anti-resonant term
+            # The conjugate of es in the AR term is needed in case QP lifetimes (GW, elph) 
+            # are included in the BSE calculation, which gives complex eigenvalues
+            
+            # Including G1 only corresponds to BSSmod="resonant" in yambo, but causes
+            # wrong behavior of eps_1(w->0+), so better to include both terms always
+            
+            r1 = EL1[s]*EL2[s]
+            r2 = np.conj(r1) # r2=r1 at q=0, but not at finite q
 
-            r = EL1[s]*EL2[s]
-            chi += r*G1 + r*G2
+            chi_r += r1*G1 + r2*G2
 
-        return w,chi
+        #Dielectric function with the correct dimensions
+        eps = 1. + ha2ev/D_vol/nk * spin*4.*np.pi/q0_norm**2. * chi_r
+
+        return w,eps
 
     def __str__(self):
         s  = "number of excitons: %d\n"%self.nexcitons

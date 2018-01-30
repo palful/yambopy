@@ -6,7 +6,7 @@
 from yambopy import *
 from math import sqrt
 from time import time
-
+ha2ev  = 27.211396132
 max_exp = 50
 min_exp =-100.
 
@@ -261,6 +261,60 @@ class YamboDipolesDB():
             eps2 += np.sum(epsk,axis=1)
 
         return freq, eps2
+
+    def get_eps(self,electrons,efield=[1.,0.,0.],nbands=[-1,-1],emin=0.,emax=10.,esteps=100,broad=0.1):
+        """
+        Compute the macroscopic complex independent-particle dielectric function (by Fulvio Paleari)
+        We use the IP responce function X_0
+        So we have eps(w) = 1+lim_{q->0}v(q)X_0(w,q)
+        Yambo test --> yambo -o c and Chimod="IP"
+
+        electrons -> electrons YamboElectronsDB
+        efield -> electric field direction
+        broad -> imaginary part of the energies (in eV)
+        nbnds -> number of [valence, conduction] bands included starting from Fermi level. Default means all are included
+        emin,emax,esteps -> frequency range for the plot (in eV)
+        """
+        
+        # First set up constants and dimensions
+        q0_norm = 1e-05
+        e0_norm = q0_norm # This ensures cancellation in the final formula
+        efield  = np.array(efield)
+        efield  = efield/np.linalg.norm(efield)*e0_norm
+        
+        s=2 # For now we assume a spin-unpolarised material
+        D_vol = self.lattice.D_vol_au # We need the unit cell volume
+
+        # Quantities that will be needed
+        dipoles = self.dipoles
+        eiv     = electrons.eigenvalues
+        weights = electrons.weights
+        nv      = electrons.nbandsv
+        nc      = electrons.nbandsc
+        nk      = self.nk_bz
+        
+        #Check bands to include in the calculation
+        if nbands[0]<0: nbnds[0]=nv
+        if nbands[1]<0: nbnds[1]=nc
+        iv = nv-nbands[0] #first valence
+        lc = nv+nbands[1] #last conduction        
+
+        #Compute X_0
+        w = np.linspace(emin,emax,esteps)
+        chi_0 = np.zeros([len(w)], dtype=np.complex128)
+        for k in xrange(nk):
+            eivk = eiv[k]
+            for c,v in product(xrange(nv,lc),xrange(iv,nv)):
+                e_trans = eivk[c]-eivk[v]
+                G1 = -1./(w-e_trans+I*broad) #This is the resonant term
+                G2 =  1./(w+e_trans+I*broad) #This is the anti-resonant term
+                dip2 = 0.
+                for i in range(3): dip2+=abs2(efield[i]*dipoles[k,i,c,v])
+                dip2 = dip2*weights[k]
+                chi_0+=dip2*(G1+G2)
+        #Dielectric function with the correct dimensions
+        eps = 1. + ha2ev/D_vol*s*4.*np.pi/q0_norm**2.*chi_0
+        return w, eps
 
     def __str__(self):
         s = ""

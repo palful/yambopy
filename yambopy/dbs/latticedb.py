@@ -51,6 +51,10 @@ class YamboLatticeDB():
         
     def process(self):
         inv = np.linalg.inv
+        #calculate volumes (au^3 / au^-3)
+        self.D_vol_au     = np.dot(self.lat[0],np.cross(self.lat[1],self.lat[2]))
+        self.R_vol_aum1   = (2.*np.pi)**3./self.D_vol_au
+
         #caclulate the reciprocal lattice
         self.rlat  = rec_lat(self.lat)
         self.nsym  = len(self.sym_car)
@@ -121,6 +125,7 @@ class YamboLatticeDB():
         self.red_kpoints      = car_red(self.car_kpoints,self.rlat)
         self.kpoints_indexes  = np.array(kpoints_indexes)
         self.symmetry_indexes = np.array(symmetry_indexes)
+        self.nkpoints_full    = len(kpoints_full)
 
     def get_path(self,path,kpts=None,debug=False):
         """

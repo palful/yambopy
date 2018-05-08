@@ -1,249 +1,146 @@
 # Copyright (c) 2016, Henrique Miranda
 # All rights reserved.
+# Authors: Alexandre Morlet, Fulvio Paleari, HM
+# This file is part of yambopy
 #
-# This file is part of the yambopy project
+from netCDF4 import Dataset
+import numpy as np
+from itertools import product,groupby
+from yambopy.lattice import *
+import os
 #
-from yambopy import *
-from yambopy.plot import *
-
-ha2ev = 27.211396132
-
 class YamboRTDB():
     """
-    Open the RT databases and store it in a RTDB class
+    Class to read information about occupations in the case of a carrier "pumping" by yambo
+
+    Arguments:
+        ``lattice``: instance of YamboLatticeDB or YamboSaveDB
+        ``electrons``: instance of YamboElectronsDB
+
+        ``save`` and ``filename``: where to read for lattice and electrons
+        ``RTsave`` and ``RTfilename``: where to read occupations
     """
-    def __init__(self,folder='.',calc='.',save=None,referencedb='ndb.RT_reference_components',carriersdb='ndb.RT_carriers'):
-        self.path = '%s/%s/pulse'%(folder,calc)
-        if save==None:
-            self.save = '%s/SAVE'%folder
-        else:
-            self.save = save
-        self.referencedb = referencedb
-        self.carriersdb = carriersdb
-
-        #read save for symmetries
-        try:
-            filename = '%s/ns.db1'%self.save
-            database    = Dataset(filename)
-        except:
-            raise ValueError( "Error reading %s database"%filename )
-        self.alat             = database.variables['LATTICE_PARAMETER'][:].T
-        self.lat              = database.variables['LATTICE_VECTORS'][:].T
-        self.sym_car          = database.variables['SYMMETRY'][:]
-        dimensions = database.variables['DIMENSIONS'][:]
-        self.time_rev = dimensions[9]
-        database.close()
-
-        #read reference database
-        database = Dataset("%s/%s"%(self.path,referencedb))
-        self.nband_min, self.nband_max, self.nkpoints = database.variables['RT_vars'][:].astype(int)
-        self.nbands = self.nband_max - self.nband_min + 1
-        db.close()
-
-        #get energies of bands
-        database = Dataset("%s/%s"%(self.path,carriersdb))
-        self.eigenvalues = database.variables['RT_carriers_E_bare'][:].reshape([self.nkpoints,self.nbands])*ha2ev
-
-        #get kpoints coordinates
-        self.kpts_iku = database.variables['RT_kpt'][:].T#.reshape([self.nkpoints,3])
-
-        db.close()
-
-        #get a list of symmetries with time reversal
-        nsym = len(self.sym_car)
-
-        #caclulate the reciprocal lattice
-        self.rlat  = rec_lat(self.lat)
-        self.nsym  = len(self.sym_car)
-
-        #convert form internal yambo units to cartesian lattice units
-        self.kpts_car = np.array([ k/self.alat for k in self.kpts_iku ])
-        #convert cartesian transformations to reduced transformations
-        inv = np.linalg.inv
-        self.sym_rlu = np.zeros([self.nsym,3,3])
-        for n,s in enumerate(self.sym_car):
-            a = np.dot(s.T,inv(self.rlat))
-            self.sym_rlu[n] = np.dot(inv(self.lat.T),a)
-
-        #convert cartesian transformations to reciprocal transformations
-        self.sym_rec = np.zeros([self.nsym,3,3])
-        for n,s in enumerate(self.sym_car):
-            self.sym_rec[n] = inv(s).T
-
-        #read the databases
+    def __init__(self,lattice,electrons,save='SAVE',filename='ns.db1',RTsave='SAVE',RTfilename='ndb.RT_carriers'):
+        self.lattice    = lattice
+        self.electrons  = electrons
+        self.filename   = '%s/%s'%(save,filename)
+        self.RTfilename = '%s/%s'%(RTsave,RTfilename)
+        self.RTsave     = RTsave
         self.readDB()
 
-        #integrate the occupations
-        self.integrate()
-
-        #status
-        self.expanded = False
-
     def readDB(self):
-        """
-        """
+        #
+        try: 
+            db     = Dataset(self.RTfilename)
+        except:
+            raise IOError("Error opening database files %s in YamboOccupationsDB"%self.RTfilename)
+      
+        indices  = db.variables['RT_carriers_dimensions'][:]
+        self.nkpoints = int(indices[0])
+        self.bands    = np.array([int(indices[1]),int(indices[2])])
+        self.nk_tot   = int(indices[3])
+        self.nbands   = self.nk_tot/self.nkpoints
+        db.close()
 
-        #get how many rt databases exist
-        files = [ filename for filename in  os.listdir(self.path) if 'ndb.RT_carriers_Time' in filename]
-        print "Number of RT carrier files:", len(files)
-
-        # sorting
+        #The pumped band energies only
+        self.eigs   = np.array( [[self.electrons.eigenvalues_ibz[ik,band-1] for band in self.bands ] for ik in range(self.nkpoints) ] )
+        
+        #Get the occupations at different time steps
+        RT_dbs = [ filename for filename in os.listdir(self.RTsave) if 'ndb.RT_carriers_Time' in filename ]
+        self.Ndbs   = len(RT_dbs)
+        self.get_times(RT_dbs)
+#
+    def get_times(self,RT_dbs):
+        #
+        # Sorting RT dbs time-wise
         units = {'as':1e-18,'fs':1e-15,'ps':1e-12}
         s = []
-        for filename in files:
+        for db in RT_dbs:
             for unit in units.keys():
-                if unit in filename:
-                    factor = units[unit]
-            s.append((float(re.findall("\d+\.\d+", filename)[0])*factor,filename))
-        ordered_files=sorted(s)
-        self.ntimes = len(ordered_files)
+                if unit in db: factor = units[unit]
+            s.append((float(re.findall("\d+\.\d+", db)[0])*factor,db))
+        RT_dbs_ordered = sorted(s)
+        self.times = [ time for time,db in RT_dbs_ordered ]
+        # Reading occupations
+        self.occ    = []
+        self.nk_occ = []
+        for i,db in enumerate(RT_dbs_ordered):
+            db_occ = Dataset('%s/%s'%(self.RTsave,db[1]))
+            self.occ.append(db_occ.variables['RT_carriers_delta_f'][:])
+            db_occ.close()
+            self.nk_occ.append(np.array( [[self.occ[i][ik*self.nbands+ib] for ib in range(self.nbands) ] for ik in range(self.nkpoints) ] ))
 
-        #read all of them
-        self.RT_carriers_delta_f        = np.zeros([self.ntimes,self.nkpoints,self.nbands])
-        #self.RT_carriers_dE_Self_Energy = np.zeros([self.ntimes,self.nbands,self.nkpoints])
-        #self.RT_carriers_dE_V_xc        = np.zeros([self.ntimes,self.nbands,self.nkpoints])
-        self.times = [ time for time,filename in ordered_files]
-
-        for n,(time,filename) in enumerate(ordered_files):
-
-            #open database for each k-point
-            database = Dataset("%s/%s"%(self.path,filename))
-
-            self.RT_carriers_delta_f[n]          = database.variables['RT_carriers_delta_f'][:].reshape([self.nkpoints,self.nbands])
-
-            #self.RT_carriers_dE_Self_Energy[n]   = database.variables['RT_carriers_dE_Self_Energy'][:].reshape([self.nkpoints,self.nbands])
-            #self.RT_carriers_dE_V_xc[n]          = database.variables['RT_carriers_dE_V_xc'][:].reshape([self.nbands,self.nkpoints])
-
-            #close database
-            db.close()
-
-    def integrate(self):
-        self.occupations = np.zeros([self.ntimes,self.nkpoints,self.nbands])
-
-        for t in xrange(0,self.ntimes):
-
-            #"delta_f" is df(t)-df(t0), so total occupation
-            self.occupations[t] = self.RT_carriers_delta_f[t]
-
-    def get_path(self,path,kpts=None):
-        """ Obtain a list of indexes and kpoints that belong to the regular mesh
+    def get_path2(self,path):
         """
-        if kpts is None:
-            kpts, nks, nss = self.expand_kpts()
-        else:
-            nks = range(len(kpts))
+        The function get_path in latticedb.py doesn't find the right points.
 
-        #points in cartesian coordinates
-        path_car = red_car(path, self.rlat)
-
-        #find the points along the high symmetry lines
-        distance = 0
-        bands_kpoints = []
-        bands_indexes = []
-
-        #for all the paths
-        for k in range(len(path)-1):
-
-            # store here all the points in the path
-            # key:   has the coordinates of the kpoint rounded to 4 decimal places
-            # value: index of the kpoint
-            #        distance to the starting kpoint
-            #        the kpoint cordinate
-            kpoints_in_path = {}
-
-            start_kpt = path_car[k]   #start point of the path
-            end_kpt   = path_car[k+1] #end point of the path
-
-            #generate repetitions of the brillouin zone
-            for x,y,z in product(range(-1,2),range(-1,2),range(1)):
-
-                #shift the brillouin zone
-                shift = red_car([np.array([x,y,z])],self.rlat)[0]
-
-                #iterate over all the kpoints
-                for index, kpt in zip(nks,kpts):
-
-                    kpt_shift = kpt+shift #shift the kpoint
-
-                    #if the point is collinear we add it
-                    if isbetween(start_kpt,end_kpt,kpt_shift):
-                        key = tuple([round(kpt,4) for kpt in kpt_shift])
-                        value = [ index, np.linalg.norm(start_kpt-kpt_shift), kpt_shift ]
-                        kpoints_in_path[key] = value
-
-            #sort the points acoording to distance to the start of the path
-            kpoints_in_path = sorted(kpoints_in_path.values(),key=lambda i: i[1])
-
-            #for all the kpoints in the path
-            for index, disp, kpt in kpoints_in_path:
-                bands_kpoints.append( kpt )
-                bands_indexes.append( index )
-                #print ("%12.8lf "*3)%tuple(kpt), index
-
-        self.bands_kpoints = bands_kpoints
-        self.bands_indexes = bands_indexes
-        self.bands_highsym_qpts = path_car
-
-        print 'Path generated using %d kpoints.'%len(bands_kpoints)
-
-        return bands_kpoints, bands_indexes, path_car
-
-    def expand_kpts(self):
-        """ Take a list of qpoints and symmetry operations and return the full brillouin zone
-        with the corresponding index in the irreducible brillouin zone
+        For now, I use this workaround that is ONLY ROBUST for systems where the
+        IBZ lies entirely in the positive octant of the reciprocal lattice space
+        (e.g. hexagonal, whereas it might not work for fcc)
         """
-
-        #check if the kpoints were already exapnded
-        if self.expanded == True: return self.kpoints_full, self.kpoints_indexes, self.symmetry_indexes
-
-        kpoints_indexes  = []
-        kpoints_full     = []
-        symmetry_indexes = []
-
-        #kpoints in the full brillouin zone organized per index
-        kpoints_full_i = {}
-
-        #expand using symmetries
-        for nk,k in enumerate(self.kpts_car):
-            for ns,sym in enumerate(self.sym_car):
-                new_k = np.dot(sym,k)
-
-                #check if the point is inside the bounds
-                k_red = car_red([new_k],self.rlat)[0]
-                k_bz = (k_red+atol)%1
-
-                #if the index in not in the dicitonary add a list
-                if nk not in kpoints_full_i:
-                    kpoints_full_i[nk] = []
-
-                #if the vector is not in the list of this index add it
-                if not vec_in_list(k_bz,kpoints_full_i[nk]):
-                    kpoints_full_i[nk].append(k_bz)
-                    kpoints_full.append(new_k)
-                    kpoints_indexes.append(nk)
-                    symmetry_indexes.append(ns)
-
-        #calculate the weights of each of the kpoints in the irreducible brillouin zone
-        self.full_nkpoints = len(kpoints_full)
-        weights = np.zeros([self.nkpoints])
-        for nk in kpoints_full_i:
-            weights[nk] = float(len(kpoints_full_i[nk]))/self.full_nkpoints
-
-        #set the variables
-        self.expanded = True
-        self.weights = np.array(weights)
-        self.kpoints_full     = np.array(kpoints_full)
-        self.kpoints_indexes  = np.array(kpoints_indexes)
-        self.symmetry_indexes = np.array(symmetry_indexes)
-
-        print "%d kpoints expanded to %d"%(len(self.kpts_car),len(kpoints_full))
-
-        return self.kpoints_full, self.kpoints_indexes, self.symmetry_indexes
+        lat = self.lattice
+        electrons = self.electrons
+        ibz_car = np.array([ k/lat.alat for k in electrons.iku_kpoints ])
+        ibz_red = car_red(ibz_car,lat.rlat)
+        
+        Npts = len(path)
+        path_car = red_car(path,lat.rlat)
+        indices = []
+        # With this loop I get the INDICES of the points along the high-sym lines
+        # Check isbetween in reduced coordinates
+        # Check distances in cartesian coordinates
+        for iK in range(Npts-1):
+            start_pt  = np.array(path[iK])
+            end_pt    = np.array(path[iK+1])
+            start_car = np.array(path_car[iK])
+            end_car   = np.array(path_car[iK+1])
+            line = []
+            for ik,k in enumerate(ibz_red):
+                if isbetween(start_pt,end_pt,abs(k)): line.append(ik)
+            if np.linalg.norm(start_car)>np.linalg.norm(end_car): line = line[::-1]
+            indices.append(line)
+        indices = indices[0]+indices[1]+indices[2]
+        self.indices = [ ind[0] for ind in groupby(indices) ]
+        self.how_many = len(self.indices)
+        distance = []
+        distance.append(0.)
+        for ik in range(1,self.how_many):
+            start_car = abs(ibz_car[self.indices[ik-1]])
+            end_car   = abs(ibz_car[self.indices[ik]])
+            distance.append(distance[ik-1]+np.linalg.norm(end_car-start_car))
+        self.distance = np.array(distance)
+    
+    def plot_bands_and_occupations(self,path,plot='gnuplot'):
+        """ Plot is 'gnuplot' or 'matplotlib' 
+        """
+        #Get kpath indices
+        self.get_path2(path)
+        #Get bands and occupations to plot
+        eigs_to_plt = self.eigs[self.indices]
+        occs_to_plt = [ occ[self.indices] for occ in self.nk_occ ]
+        #Build multidimentsional list for each time step: [ [x],[ind],[b1 .... bN],[occ1 .... occN] ]              
+        list_to_plot = []
+        x_axis = np.concatenate((self.distance.reshape(self.how_many,1),np.array(self.indices).reshape(self.how_many,1)),axis=1)
+        for tstep in range(self.Ndbs): 
+            list_to_plot.append(np.concatenate((x_axis,eigs_to_plt,occs_to_plt[tstep]),axis=1))    
+            #Print a plottable data file (i.e. gnuplot,matplotlib)
+            if plot=='matplotlib':
+                np.savetxt('bnds_occs_time_%s_mpl.dat'%str(tstep),list_to_plot[tstep],fmt='%4.5f',header='x\t\t#index\t\t#bands: %d cols\t\t#occupations: %d cols'%(self.nbands,self.nbands))
+            if plot=='gnuplot':
+                open('bnds_occs_time_%s_gnu.dat'%str(tstep),'w').close()
+                f = open('bnds_occs_time_%s_gnu.dat'%str(tstep),'a')
+                f.write('#x\t\t#index\t\t#band\t\t#occupations\n')
+                for ib in range(self.nbands):   
+                    format_to_print = np.transpose([ list_to_plot[tstep][:,0],list_to_plot[tstep][:,1],list_to_plot[tstep][:,2+ib],list_to_plot[tstep][:,2+self.nbands+ib] ])
+                    np.savetxt(f,format_to_print,fmt='%4.5f')
+                    #np.savetxt(f,list_to_plot[tstep][:,0],fmt='%4.5f')
+                    f.write('\n')
+                f.close()
 
     def __str__(self):
-        s = ""
-        s += "nkpoints: %d\n"%self.nkpoints
-        s += "min_band: %d\n"%self.nband_min
-        s += "max_band: %d\n"%self.nband_max
-        return s
+        s =  ""
+        s += "nbands pumped: %d\n"%self.nbands
+        s += "from %d to %d\n"%(self.bands[0],self.bands[1])
+        s += "Number of time steps: %d"%self.Ndbs
+        return s         
 

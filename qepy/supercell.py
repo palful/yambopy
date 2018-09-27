@@ -62,9 +62,10 @@ class supercell():
             R is a list of repetitions of the uc in the cartesian directions
         Call self.nd_sup(Q) to build nondiagonal supercell
             Q contains the fractional coordinates of the q-point to be folded at Gamma in a nondiagonal supercell like [[m1,m2,m3],[n1,n2,n3]]
-        Call self.displace(modes_file,Temp=0.1) to displace supercell
+        Call self.displace(modes_file,new_atoms,Temp=0.1) to displace supercell
             modes_file is a QE-DFPT phonon-mode output
             Temp is the width of the displacements in bohr (for now; in the future it will be the harmonic displacements at a certain temperature)
+            new_atoms is the output of (n)d_sup
         """
         self.qe_input = qe_input
         self.latvec   = np.array(qe_input.cell_parameters)
@@ -84,6 +85,7 @@ class supercell():
         self.initialize_phonons(modes_file,self.atypes,Temp)
         phases = self.getPhases()                
         expand_eigs = np.array([phases[i]*self.eigs for i in range(self.sup_size)])
+        self.print_expanded_eigs(expand_eigs,modes_file) #Print expanded eigs
         #Take real part
         for cell in range(self.sup_size): expand_eigs[cell]= self.take_real(expand_eigs[cell])
         disps = expand_eigs.real.astype(float)
@@ -99,7 +101,32 @@ class supercell():
             if 'Q' in globals(): mode='nd'
             else: mode='diagonal'
             self.modes_qe = [self.write(new_atoms,mode,phonon=disps_slice) for disps_slice in self.disps]
-       
+    
+    def print_expanded_eigs(self,exp_eigs,modes_file):
+        #Print expanded modes in QE-style, to compare and for reference
+        q = np.array([float(self.Q[0,i])/float(self.Q[1,i]) for i in range(3)])
+        ncells = int(np.max(np.array(self.Q[1])))
+        sc_basis = self.basis*ncells
+        freq_THz,freq_cmm1=read_frequencies(modes_file,units='Tera'),read_frequencies(modes_file,units='cmm1')
+        exp_eigs = exp_eigs.swapaxes(0,1) #[mode][cell][basis][direction]
+        filename = self.qe_input.control['prefix'][1:-1]+"_s.modes_expanded"
+        exp_eigs_file = open(filename,"w")
+        exp_eigs_file.write("     diagonalizing the dynamical matrix ...\n")
+        exp_eigs_file.write("\n")
+        exp_eigs_file.write(" q =     %2.5f   %2.5f   %2.5f\n"%(q[0],q[1],q[2]))
+        exp_eigs_file.write(" **************************************************************************\n") 
+        for m in range(3*self.basis):
+            exp_eigs_file.write("     freq (   %d) =       %2.6f [THz] =       %2.6f [cm-1]\n" \
+                                %(m+1,freq_THz[m],freq_cmm1[m]))
+            for c in range(ncells):
+                for a in range(self.basis):
+                    exp_eigs_file.write("( %2.6f  %2.6f  %2.6f  %2.6f  %2.6f  %2.6f )\n" \
+                                        %(exp_eigs[m,c,a,0].real,exp_eigs[m,c,a,0].imag, \
+                                          exp_eigs[m,c,a,1].real,exp_eigs[m,c,a,1].imag, \
+                                          exp_eigs[m,c,a,2].real,exp_eigs[m,c,a,2].imag))
+        exp_eigs_file.write(" **************************************************************************")
+        exp_eigs_file.close()
+
     def initialize_phonons(self,modes_file,atypes,Temp):
         #Read frequencies
         Omega = read_frequencies(modes_file)
@@ -143,7 +170,7 @@ class supercell():
            NB2: Eigenmodes from quantum espresso are ALREADY weighted by atomic masses
         """
         RESCALE     = b2a*self.Temp  #Arbitrary displacement
-        temperature = self.Temp      #Harmonic displacement
+        temperature = 0.*self.Temp      #Harmonic displacement (permanently set to zero for now)
         modes=3*self.basis
         displacements=[]
         lengths_per_mode=[]

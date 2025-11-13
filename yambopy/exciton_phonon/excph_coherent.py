@@ -1,22 +1,27 @@
 ##
-## Authors: MN (FP adapted)
+## Authors: FP
 ##
 import numpy as np
 import os
 from yambopy.dbs.excitondb import YamboExcitonDB
 from yambopy.bse.exciton_matrix_elements import exciton_X_matelem
 from yambopy.bse.rotate_excitonwf import rotate_exc_wf
+from yambopy.kpoints import build_ktree,find_kpt
+from yambopy.tools.function_profiler import func_profile
 from tqdm import tqdm
 
-def exciton_phonon_matelem(latdb,elphdb,wfdb,Qrange=[0,1],BSE_dir='bse',BSE_Lin_dir=None,
-                           neigs=-1,dmat_mode='run',save_files=True,exph_file='Ex-ph.npy',overwrite=False):
+def coherent_exciton_phonon_matelem(latdb,elphdb,wfdb,Qrange=[0,1],BSE_dir='bse',
+                                    neigs=-1,dmat_mode='run',gbare=False,save_files=True,
+                                    exph_file='COH-Ex-ph.npy',overwrite=False):
     """
-    This function calculates the exciton-phonon matrix elements
+    This function calculates the "coherent" first-order exciton-phonon matrix elements
+    (see Eq. XX of Ref. YY). These are phonon-mediated electron-hole couplings 
+    rotated in the exciton basis (similar to BSE-Hartree diagram but with phonon
+    propagator instead of Coulomb interaction).
 
-    - Q is the exciton momentum
-    - q is the phonon momentum
-    - exc_in represent the "initial" exciton states in the scattering process (at mom. Q)
-    - exc_out represents the "final" exciton states in the scattering process (at mom. Q+q)
+    These terms appear in the excitonic Ehrenfest dynamics (at Q=0).
+
+    - Q is the exciton and phonon momentum
 
     Parameters
     ----------
@@ -29,8 +34,6 @@ def exciton_phonon_matelem(latdb,elphdb,wfdb,Qrange=[0,1],BSE_dir='bse',BSE_Lin_
         The YamboWFDB object which contains the wavefunction information.
     BSE_dir : str, optional
         The name of the folder which contains the BSE calculation. Default is 'bse'.
-    BSE_Lin_dir : str, optional
-        The name of the folder which contains the BSE Q=0 calculation (for optical spectra). Default is BSE_dir.
     Qrange : int list, optional
         Exciton Qpoint index range [iQ_initial, iQ_final] (python counting). Default is [0,1] (Gamma point only).
         Note that the indexing is in full BZ and not in iBZ. See wfc.kBZ to see the kpoints in full BZ
@@ -38,6 +41,8 @@ def exciton_phonon_matelem(latdb,elphdb,wfdb,Qrange=[0,1],BSE_dir='bse',BSE_Lin_
         Number of excitonic states included in calculation. Default is -1 (all).
     dmat_mode : str, optional
         If 'save', print dmats on .npy file for faster recalculation. If 'load', load from .npy file. Else, calculate Dmats at runtime.
+    gbare : bool, optional
+        if True, the bare el-ph matrix elements will be used. Default is False.
     save_files : bool, optional
         If True, the matrix elements will be saved in .npy file `exph_file`. Default is True.
     overwrite : bool, optional
@@ -66,11 +71,26 @@ def exciton_phonon_matelem(latdb,elphdb,wfdb,Qrange=[0,1],BSE_dir='bse',BSE_Lin_
     exph_mat = []
     for iQ in tqdm(range(Qrange[0],Qrange[1])):
         Q_in = wfdb.kBZ[iQ]
-        exph_mat.append( exciton_phonon_matelem_iQ(elphdb,wfdb,exdbs,Dmats,\
-                                                   BSE_Lin_dir=BSE_Lin_dir,Q_in=Q_in,neigs=neigs) )
+        latdb = wfdb.ydb
+        # Determine Lkind(in)
+        Ak = rotate_Akcv_Q(wfdb, exdbs, Q_in, Dmats )    
+        # Get phonons
+        ph_eig, elph_mat = elphdb.read_iq(iQ,convention='standard')
+        # use bare matrix elements if selected
+        #if gbare: 
+            # call descreen directly
+        elph_mat = elph_mat.transpose(1,0,2,4,3)
+        # Compute ex-ph
+        Akq = rotate_Akcv_Q(wfdb, exdbs, Q_in, Dmats) # Q
+        tmp_exph = coherent_X_matelem(Q_in, Akq, elph_mat, wfdb.kBZ, ktree=wfdb.ktree)
+        ## 0.5 for Ry to Ha
+        tmp_exph = 0.5 * tmp_exph.transpose(0,1) # [nmodes, nexc ]
+
+        exph_mat.append(tmp_exph)
+
     # IO
     if len(exph_mat)<2: exph_mat = exph_mat[0] # single Q-point calculation (suppress axis)
-    else:               exph_mat = np.array(exph_mat) #[nQ,nq,nmodes,nexc_in (Qexc),nexc_out (Qexc+q)]
+    else:               exph_mat = np.array(exph_mat) # [nQ,nmodes,nexc]
     
     if save_files: 
         if exph_file[-4:]!='.npy': exph_file = exph_file+'.npy'
@@ -79,51 +99,54 @@ def exciton_phonon_matelem(latdb,elphdb,wfdb,Qrange=[0,1],BSE_dir='bse',BSE_Lin_
     
     return exph_mat
 
-def exciton_phonon_matelem_iQ(elphdb,wfdb,exdbs,Dmats,BSE_Lin_dir=None,
-                              Q_in=np.zeros(3),neigs=-1,dmat_mode='run'): 
+@func_profile
+def coherent_X_matelem(exe_kvec, Akq, Omn, kpts, ktree=None):
     """
-    This function calculates the exciton-phonon matrix element per Q 
-
-    - Q is the exciton momentum
-    - q is the phonon momentum
-    - exc_in represent the "initial" exciton states in the scattering process (at mom. Q)
-    - exc_out represents the "final" exciton states in the scattering process (at mom. Q+q)
+    Compute g_cv rotation in the excitonic basis: <S Q| g(k-Q,Q) 
 
     Parameters
     ----------
-    elphdb : LetzElphElectronPhononDB
-        The LetzElphElectronPhononDB object which contains the electron-phonon matrix
-        elements.
-    wfdb : YamboWFDB
-        The YamboWFDB object which contains the wavefunction information.
-    exdbs : YamboExcitonDB list
-        List of Q+q YamboExcitonDB objects containing the BSE calculation
-    BSE_Lin_dir : str, optional
-        The name of the folder which contains the BSE q=0 calculation (for optical spectra). Default is exdbs[Q].
-    Q_in : np.ndarray, optional
-        Excitonic momentum in reduced units. Default np.array([0.0,0.0,0.0]) 
-    neigs : int, optional
-        Number of excitonic states included in calculation. Default is -1 (all).
+    exe_kvec : array_like
+        Exciton k-vector in crystal coordinates (k).
+    Akq : array_like
+        Wavefunction coefficients for k+Q (bra wfc) with shape (n_exe_states, 1, ns, nk, nc, nv).
+    Omn : array_like
+        Matrix elements of the operator O in the basis of electronic states with shape (nlambda, nk, nspin, m_bnd, n_bnd).
+        ie Omn = < k+q, m, s | O(q) | n, k, s>, where m_bnd and n_bnd are final and initial bands, respectively.
+        s is spin index
+    kpts : array_like
+        K-points used to construct the BSE with shape (nk, 3) in crystal coordinates.
+    ktree : KDtree, optional
+        If None, will build internally, else use the user provided
+    Returns
+    -------
+    ex_O_mat : ndarray
+        The computed exciton matrix elements with shape (nlambda, n_exe_states)
     """
-    latdb = wfdb.ydb
-    # Determine Lkind(in)
-    Ak = rotate_Akcv_Q(wfdb, exdbs, Q_in, Dmats, folder=BSE_Lin_dir)
-    # Compute ex-ph
-    exph_mat = []
-    for iq in range(elphdb.nq):
-        ph_eig, elph_mat = elphdb.read_iq(iq,convention='standard')
-        elph_mat = elph_mat.transpose(1,0,2,4,3)
-        #
-        Akq = rotate_Akcv_Q(wfdb, exdbs, Q_in + elphdb.qpoints[iq], Dmats) # q+Q
-        tmp_exph = exciton_X_matelem(Q_in, elphdb.qpoints[iq], \
-                                     Akq, Ak, elph_mat, wfdb.kBZ, \
-                                     contribution='b', diagonal_only=False, ktree=wfdb.ktree)
-        exph_mat.append(tmp_exph)
+    # Number of phonon modes
+    nlambda = Omn.shape[0]
+    #
+    assert Akq.shape[1] == 1, "Works only with TDA."
+    # Shape of the wavefunction coefficients
+    n_exe_states, bse_calc, ns, nk, nc, nv = Akq.shape # notice last axes being (k,c,v)
+    #
+    # Build a k-point tree for efficient k-point searching
+    if ktree is None : ktree = build_ktree(kpts)
+    #
+    # Find the indices of k-Q in the k-point tree
+    idx_k_minus_Q = find_kpt(ktree, kpts - exe_kvec[None,:]) # k-Q needed for standard el-ph
+    #
+    # Extract the electron-hole channel of the Omn matrix, i.e. (k,c,v)
+    Ocv = Omn[:, idx_k_minus_Q, :, nv:, :nv]
+    #
+    # We are now flattening following (k,c,v) order for both A and O
+    Akq_conj = Akq[:,0].reshape(n_exe_states,-1).conj()
+    Ocv = Ocv.reshape(nlambda,-1)
+    #
+    # Calculation
+    ex_O_mat = np.einsum('xt,lt->lx',Akq_conj,Ocv,optimize=True)
+    return ex_O_mat
 
-    ## 0.5 for Ry to Ha
-    exph_mat = 0.5 * np.array(exph_mat).transpose(0,1,3,2) #[nq,nmodes,nexc_in (Qexc),nexc_out (Qexc+q)]
-
-    return exph_mat
 
 def save_or_load_dmat(wfdb, mode='run', dmat_file='Dmats.npy'):
     """

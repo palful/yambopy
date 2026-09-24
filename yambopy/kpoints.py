@@ -225,39 +225,50 @@ def regular_grid(nk1,nk2,nk3):
     ])
     return xkg.T # shape [nk,3]
 
-def find_kpatch(kpts, kcentre, kdist, lat_vecs):
+
+def find_kpatch(kpts, kcentre, lat_vecs, nshells=1, tol=1e-5, G_range=3):
     """
-    find set of kpoints around the kcentre with in kdist
+    Find k-points belonging to the first `nshells` neighbor shells
+    around kcentre, including degeneracies and rigorous BZ mapping.
 
     Parameters
     ----------
-    kpts : kpoints in crystal coordinates (nk,3)
-    kcentre : kpoint centre in crystal coordinates (3)
-    kdist : distance around kcentre to be considered in atomic units 
-            i.e 1/bohr.
-    lat_vecs: lattice vectors. ith lattice vector is ai = a[:,i]
+    kpts : (nk, 3)
+        k-points in crystal (fractional) coordinates
+    kcentre : (3,)
+        center k-point in crystal coordinates
+    lat_vecs : (3,3)
+        lattice vectors. ith lattice vector is ai = a[:,i]
+    nshells : int
+        number of neighbor shells to include
+    tol : float
+        tolerance for degeneracy
+    G_range : int
+        Range of surrounding reciprocal cells to check. G_range=2 checks 343 cells,
+        which is sufficient when combined with initial rounding.
+
     Returns
     -------
-    int array
-        Indices of kpoints in kpts array which satify the given condition i.e
-        | k - kcentre + G0| <= kdist, where G0 is reciprocal lattice vector to bring to BZ
+    idx : array of int
+        indices of selected k-points
     """
-    #
-    blat = 2*np.pi*np.linalg.inv(lat_vecs)
-    kdiff = kpts-kcentre[None,:]
-    kdiff = kdiff-np.floor(kdiff)
-    #
-    tmp_arr = np.array([-3, -2, -1, 0, 1, 2, 3])
-    nG0 = len(tmp_arr)
-    G0 = np.zeros((nG0,nG0,nG0,3))
-    G0[...,0], G0[...,1], G0[...,2] = np.meshgrid(tmp_arr, tmp_arr,
-                                                  tmp_arr, indexing='ij')
-    G0 = G0.reshape(-1,3)
-    kdiff = kdiff[:,None,:]-G0[None,:,:]
-    kdiff = kdiff.reshape(-1,3)@blat
-    kdiff = np.linalg.norm(kdiff,axis=-1).reshape(len(kpts),-1)
-    kdiff = np.min(kdiff,axis=-1)
-    return np.where(kdiff <= kdist)[0]
+    kcentre = np.array(kcentre)
+    blat = 2 * np.pi * np.linalg.inv(lat_vecs)
+    kdiff = kpts - kcentre[None, :]
+    kdiff = kdiff - np.round(kdiff)
+    g_vals = np.arange(-G_range, G_range + 1)
+    G_grid = np.array(list(product(g_vals, repeat=3)))
+    kdiff_all = kdiff[:, None, :] + G_grid[None, :, :]
+    kcart_all = kdiff_all @ blat
+    dist_all = np.linalg.norm(kcart_all, axis=-1)
+    dist = np.min(dist_all, axis=-1)
+    dist_sorted = np.sort(dist)
+    unique_mask = np.concatenate(([True], np.diff(dist_sorted) > tol))
+    unique_dists = dist_sorted[unique_mask]
+    if nshells > len(unique_dists):
+        raise ValueError("nshells larger than available unique distance shells")
+    cutoff = unique_dists[nshells - 1]
+    return np.where(dist <= cutoff + tol)[0]
 
 def kfmt(kpt,digits=6):
     """

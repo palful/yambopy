@@ -2,10 +2,19 @@
 # Authors: MN
 #
 import atexit
+import sys
 
 # Global citation registry
 _CITATIONS_USED = set()
-_SUCCESS = False
+
+_HAS_ERROR = False
+
+def _custom_excepthook(exc_type, exc_value, exc_traceback):
+    global _HAS_ERROR
+    _HAS_ERROR = True
+    sys.__excepthook__(exc_type, exc_value, exc_traceback)
+
+sys.excepthook = _custom_excepthook
 
 def citation(ref: str):
     """
@@ -65,10 +74,7 @@ def print_citations():
     --------
     Typical output:: Run this script.
     """
-    if not _SUCCESS:
-        return
-
-    if not _CITATIONS_USED:
+    if _HAS_ERROR or not _CITATIONS_USED:
         return
 
     print("\n=========================================================")
@@ -96,3 +102,4 @@ if __name__ == "__main__":
     for i in range (3) :
         Intersteller()
         Tenet()
+    #assert False, "No "

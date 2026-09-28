@@ -4,15 +4,16 @@
 
 import numpy as np
 from yambopy.units import ha2ev
-from yambopy.tools.funcs import bose,boltzman_f
 from yambopy.kpoints import build_ktree,find_kpt,check_kgrid,kfmt
+from yambopy.tools.funcs import bose,boltzman_f
+from yambopy.tools.degeneracy_finder import find_degeneracy_evs
 from yambopy.tools.tetra import *
 from tqdm import tqdm
 from yambopy.tools.citations import citation
 from joblib import Parallel, delayed
 
 @citation("To be added")
-def exc_ph_lifetimes(nexc_in,ph_temp,ph_energies,exc_energies,exc_ph_mat_el,qpoints_red,Q=0,nexc_out=-1,exc_temp=0.,broad=0.005,exc_energies_in=None,ktree=None,rlat_cc=1.,njobs=1,free_memory=False):
+def exc_ph_lifetimes(nexc_in,ph_temp,ph_energies,exc_energies,exc_ph_mat_el,qpoints_red,Q=0,nexc_out=-1,exc_temp=0.,broad=0.005,BZ_integral='lorentzian',exc_energies_in=None,ktree=None,rlat_cc=1.,njobs=1,free_memory=False,as_yambo=False):
     """
     This class calculates the exciton-phonon lifetimes using the following expression:
 
@@ -48,6 +49,9 @@ def exc_ph_lifetimes(nexc_in,ph_temp,ph_energies,exc_energies,exc_ph_mat_el,qpoi
         If given, effective temperature controlling excitonic population. Default is no excitonic population.
     :: broad : float, optional
         Delta function lorentzian broadening in eV (default is 5 meV).
+    :: BZ_integral: string, optional
+        if 'lorentzian' (default): use broadened delta function
+        if 'tetra': use optimized tetrahedron method
     :: exc_energies_in : float ndarray, optional
         If given, zero-momentum states will be taken from this array. Default is exc_energies.
     :: ktree: int ndarray, optional
@@ -59,27 +63,33 @@ def exc_ph_lifetimes(nexc_in,ph_temp,ph_energies,exc_energies,exc_ph_mat_el,qpoi
     :: free_memory : bool, optional
         If True, progressively delete input array when auxiliary quantities are constructed (default False)
 
-    Implementation steps:
-        - [OPT] Deg. finder for q=0 at E_in and E_out, how to treat degenerate states?
-
-            * TO CHECK: if E_in(q=0) degenerate with E_sum(q=0) pole is zero [Hidden option]
-            * TO CHECK: if E_in is exactly the same state a E_out, pole is zero [Hidden option]
     Notes (check these and do the same as lumen):
-        - At q=0, degenerate states are set at exactly equal energy values (average)
-        - By default the sum over exc. states does not include self-scattering 
-        - By default self-scattering is excluded over full degenerate subspaces
-        - By default lifetime values over degenerate states are averaged
+        - Consider if implementing lifetimes averaging for degenerate states
+        - At Q_in, degenerate states are set at exactly equal energy values (average)
     """
-    def get_G2_aux(G,PH_E,PH_thresh):
+
+    def apply_thresholds(G,PH_E,EXC_E_in,EXC_E_out,PH_thresh,remove_deg=False,Q=0):
         """
-        - reshape G[q,ph,ei,eo] into |G[ei,q,x]|^2
-        - obtain x=(ph,eo) table
-        - apply checks on degeneracies and zero energies
+        - apply checks on degeneracies and zero energies:
+            - zero contribution from ~0 phonon energies
+            - [Optional] remove degenerate states from sum
         """
         # Set to zero the scattering if phonon energy is ~0
         # acoustic phonons are already excluded as G set to czero
-        #G[PH_E<PH_thresh]=0.
-        # Degenerate states handling
+        G[PH_E<PH_thresh,:,:]=0.
+        
+        # if q=0, i.e., Q_in = Q_out, then remove Q_in degenerate states
+        if remove_deg:
+            deg_states = np.abs(EXC_E_in[:,None]-EXC_E_out[0,None,:])<PH_thresh
+            G[0,:,deg_states]=0.
+
+        return G
+
+    def get_G2_aux(G,PH_E,PH_thresh,remove_deg=False,Q=0):
+        """
+        - reshape G[q,ph,ei,eo] into |G[ei,q,x]|^2
+        - obtain x=(ph,eo) table
+        """
         # Reshape
         nq,nm,ne_i,ne_o = G.shape
         exc_ph_aux = G.transpose(2,0,1,3).reshape(nq,ne_i,nm*ne_o)
@@ -120,6 +130,7 @@ def exc_ph_lifetimes(nexc_in,ph_temp,ph_energies,exc_energies,exc_ph_mat_el,qpoi
     no_matrix_elements=False
 
     # Checks
+    assert ('tetra' or 'lorentzian') in BZ_integral, "Need to specify how to evaluate q-integral (either 'lorentzian' or 'tetra')."
     assert exc_energies.shape[0]==ph_energies.shape[0], "q-point mismatch between excitons and phonons"
     nqpts = ph_energies.shape[0]
     if exc_energies_in is None: exc_energies_in = exc_energies[Q]
@@ -137,19 +148,26 @@ def exc_ph_lifetimes(nexc_in,ph_temp,ph_energies,exc_energies,exc_ph_mat_el,qpoi
     assert ph_energies.shape[1]==exc_ph_mat_el.shape[1], "number of modes mismatch between phonon energies and matrix elements"
 
     # Threshold for zero energy phonons (1.05*MAX(q=0 acoustic energies))
+    # Used also to determine degenerate exc. states to optionally exclude from sum
     PH_thresh = np.max(np.abs(ph_energies[0,:3]))*1.05
     if PH_thresh>0.05: print("[WARNING] High threshold for zero phonon energies (>5 meV), check phonon dispersion")
-    
+   
+    # Find degenerate subspaces in exc_energies_in
+    degs_in = find_degeneracy_evs(exc_energies_in,atol=1e-3,rtol=1e-3)
+
     # Evaluate exc_out energies at q+Q
     qpts = qpoints_red
     if ktree is None : ktree = build_ktree(qpts)
     idx_Q_plus_q = find_kpt(ktree, qpts + qpts[Q,:])  # q+Q
     exc_energies = exc_energies[idx_Q_plus_q,:]
 
+    # Apply thresholds
+    exc_ph_mat_el = apply_thresholds(exc_ph_mat_el,ph_energies,exc_energies_in,exc_energies,PH_thresh,remove_deg=as_yambo,Q=Q)
+    
     # Creation of auxiliary index x=(b,m,s)
     N_aux = nmodes*nexc_out*2
-    
-    # Construct scattering strengths G2[q,x] and apply thresholds
+
+    # Construct scattering strengths G2[q,x]
     if no_matrix_elements: exc_ph_aux = np.ones(nexc_in,nqpts,N_aux)
     else: exc_ph_aux, x_table = get_G2_aux(exc_ph_mat_el,ph_energies,PH_thresh)
     if free_memory: del exc_ph_mat_el
@@ -176,19 +194,24 @@ def exc_ph_lifetimes(nexc_in,ph_temp,ph_energies,exc_energies,exc_ph_mat_el,qpoi
     E[:,nmodes*nexc_out:] = E_aux[1]
     if free_memory: del E_aux
 
-    # send to external function for evaluation with lorentzian
+    # send to function for evaluation with lorentzian
     # parallelised here with joblib
-    broad = broad/2. # We are using explicit Lorentzian shape
-    invtau = np.array( list( tqdm( Parallel(return_as="generator",n_jobs=njobs)(delayed(lifetime_lorentzian)(exc_energies[iE_in]/ha2ev,C[iE_in],E/ha2ev,broad/ha2ev) for iE_in in range(nexc_in)), total=nexc_in, desc="Exc-ph lifetime calculation")))
-    # serial check
-    #invtau = np.zeros(nexc_in)
-    #for iE_in tqdm(range(nexc_in),desc="Exc-ph lifetime calculation") :
-    #    E_in = exc_energies_in[iE_in]
-    #    invtau[iE_in] = lifetime_lorentzian(C,E/ha2ev,E_in/ha2ev,broad/ha2ev)
+    if BZ_integral=='lorentzian':
+        broad = broad/2. # We are using explicit Lorentzian shape
+        invtau = np.array( list( tqdm( Parallel(return_as="generator",n_jobs=njobs)(delayed(lifetime_lorentzian)(exc_energies[iE_in]/ha2ev,C[iE_in],E/ha2ev,broad/ha2ev) for iE_in in range(nexc_in)), total=nexc_in, desc="Exc-ph lifetime calculation")))
+        # serial check
+        #invtau = np.zeros(nexc_in)
+        #for iE_in tqdm(range(nexc_in),desc="Exc-ph lifetime calculation") :
+        #    E_in = exc_energies_in[iE_in]
+        #    invtau[iE_in] = lifetime_lorentzian(C,E/ha2ev,E_in/ha2ev,broad/ha2ev)
         
     # send to external function for evaluation with tetrahedra
     # use internal tetrahedron parallelization
-    invtau = lifetime_tetra(C,E/ha2ev,exc_energies_in/ha2ev,qpts,RLAT=rlat_cc,njobs=njobs)
+    if BZ_integral='tetra':
+        invtau = lifetime_tetra(C,E/ha2ev,exc_energies_in/ha2ev,qpts,RLAT=rlat_cc,njobs=njobs)
+
+    # Take lifetime average between degenerate E_in states
+    #invtau = take_deg_average(degs_in,invtau)
 
     return invtau
 
@@ -216,3 +239,23 @@ def lifetime_tetra(C,E,E_in,qpts,RLAT=1.,njobs=1):
     tetra = get_tetrahedra_mesh(nq1,nq2,nq3,qpts,RLAT)
     invtau = spectra_tetrahedron(E,tetra,E_in,nspin=1,matels=C,njobs=njobs)
     return invtau * ha2ev * 1000. # return value in meV
+
+def take_deg_average(deg_list,quantity):
+    """
+    Average quantity over degenerate subspaces from deg_list.
+
+    * deg_list: output of find_degeneracy_evs(energies)
+    * quantity: quantity to average according to energy degeneracies
+    """
+    if len(deg_list)!=len(quantity):
+        raise ValueError(f"[ERROR] the quantity to average must be a numpy 1D-array with same dimension as set of band energies considered ({len(deg_list)})")
+
+    deg_avg_quantity = np.copy(quantity)
+    if deg_list is not None:
+        for subspace in deg_list:
+            if len(subspace)<=1: continue
+            deg_avg_value = np.mean(quantity[subspace])
+            deg_avg_quantity[subspace]=deg_avg_value
+
+    return deg_avg_quantity
+

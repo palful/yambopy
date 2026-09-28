@@ -27,6 +27,8 @@ def exc_ph_get_inputs(lat_path,elph_path,bse_path1,mode='PL',bse_path2=None,
     * Exciton energies [nexc_in] (eV)
     * Exciton-phonon matrix elements [nq,nmodes,nexc_in,nexc_out] (hartree)
     * if mode=='PL': Exciton dipoles [pol,nexc_in] (bohr)
+    * if mode=='life': qpoints in reduced coordinates [nq,3]
+                       ktree for qpoints
 
     Parameters
     ----------
@@ -38,7 +40,7 @@ def exc_ph_get_inputs(lat_path,elph_path,bse_path1,mode='PL',bse_path2=None,
         Path to Lout directory (ndb.BS_diago_Q*)
     mode : string, optional
         * 'PL': prepare input for `excph_luminescence` (default)
-        * 'life': prepare input for `excph_lifetimes` (TBD)
+        * 'life': prepare input for `excph_lifetimes`
     bse_path2 : string, optional
         Path to Lin directory. Default bse_path1.
     wf_path : string, optional
@@ -121,6 +123,7 @@ def exc_ph_get_inputs(lat_path,elph_path,bse_path1,mode='PL',bse_path2=None,
     # Return data
     if mode=='PL':
         return ph_energies, exc_energies, exc_energies_in, excph_couplings, exc_dipoles 
+    elif mode=='life':
+        return ph_energies, exc_energies, exc_energies_in, excph_couplings, qpoints_ph, wfcs.ktree 
     else: 
         return ph_energies, exc_energies, exc_energies_in, excph_couplings 
-    # if mode=='life': TBD

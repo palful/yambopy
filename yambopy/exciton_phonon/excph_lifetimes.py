@@ -5,14 +5,14 @@
 import numpy as np
 from yambopy.units import ha2ev
 from yambopy.tools.funcs import bose,boltzman_f
-from yambopy.kpoints import build_ktree, find_kpt
+from yambopy.kpoints import build_ktree,find_kpt,check_kgrid,kfmt
 from yambopy.tools.tetra import *
 from tqdm import tqdm
 from yambopy.tools.citations import citation
 from joblib import Parallel, delayed
 
 @citation("To be added")
-def exc_ph_lifetimes():
+def exc_ph_lifetimes(nexc_in,ph_temp,ph_energies,exc_energies,exc_ph_mat_el,qpoints_red,Q=0,nexc_out=-1,exc_temp=0.,broad=0.005,exc_energies_in=None,ktree=None,rlat_cc=1.,njobs=1,free_memory=False):
     """
     This class calculates the exciton-phonon lifetimes using the following expression:
 
@@ -31,13 +31,15 @@ def exc_ph_lifetimes():
         Number of excitonic states 'a' for which to compute lifetimes.
     :: ph_temp : float
         Lattice temperature in kelvin
-    :: lat : YamboLatticeDB object
     :: ph_energies : float ndarray
         Phonon energies in eV [nqpts,nmodes]
     :: exc_energies : float ndarray
         Exciton energies in eV [nqpts,nexc_out]
     :: exc_ph_mat_el : cmplx ndarray
         Exciton-phonon coupling matrix elements in a.u. (hartree) at momentum Q in the full BZ [nqpts,nmodes,nexc_in,nexc_out]
+    :: qpoints_red : float ndarray
+        phonon qpoints in reduced coordinates in full BZ [nqpts,3]
+        NOTE: exc energies must be q-ordered consistently, check excph_input_data for code string to ensure that.
     :: Q : int, optional
         Exciton Qpoint index in full BZ (python counting). Default is 0 (Gamma point).
     :: nexc_out : int, optional
@@ -48,28 +50,17 @@ def exc_ph_lifetimes():
         Delta function lorentzian broadening in eV (default is 5 meV).
     :: exc_energies_in : float ndarray, optional
         If given, zero-momentum states will be taken from this array. Default is exc_energies.
+    :: ktree: int ndarray, optional
+        ktree initialized for qpoints. Default None (will be created). 
+    :: rlat_cc: float ndarray, optional
+        Reciprocal lattice vectors in QE cc coordinates to initialize tetrahedron method: lat.rlat*lat.alat[0] if lat=YamboLatticeDB. Default 1. 
     :: njobs : int, optional
         Number of jobs for joblib parallelization (Default 1).
     :: free_memory : bool, optional
         If True, progressively delete input array when auxiliary quantities are constructed (default False)
 
     Implementation steps:
-        FIX UNITS!
-        - Usual checks such as for PL
         - [OPT] Deg. finder for q=0 at E_in and E_out, how to treat degenerate states?
-        - Integration with tetrahedron method
-        - Parallelism:
-            * q-point loop: parallel with joblib + tetrahedron integration: there should be an option, either broadening or tetra!
-            * a-loop: serial? Typically low number
-            * b-loop: parallel with joblib + tetrahedron integration
-            * m-loop: parallel as well? 
-        - Calculation:
-            * Calculate |G|^2
-            * Calculate F
-            * Calculate POLE
-            * Optional output: q-resolved lifetime but only if one Q
-        - Pole:
-            * if ph_energy < AC_thresh pole is zero; AC thresh is max(abs(acoustic energies at Gamma)*1.05 ; warning if > 5 meV
 
             * TO CHECK: if E_in(q=0) degenerate with E_sum(q=0) pole is zero [Hidden option]
             * TO CHECK: if E_in is exactly the same state a E_out, pole is zero [Hidden option]
@@ -125,6 +116,9 @@ def exc_ph_lifetimes():
         E = E.reshape(2,nq,nm*ne_o)
         return E
 
+    # Debug
+    no_matrix_elements=False
+
     # Checks
     assert exc_energies.shape[0]==ph_energies.shape[0], "q-point mismatch between excitons and phonons"
     nqpts = ph_energies.shape[0]
@@ -147,20 +141,17 @@ def exc_ph_lifetimes():
     if PH_thresh>0.05: print("[WARNING] High threshold for zero phonon energies (>5 meV), check phonon dispersion")
     
     # Evaluate exc_out energies at q+Q
-    # I NEED elph.qpoints
-    # THIS PART CAN BE SENT TO exc_ph_get_inputs with mode=='life'
-    # Modify the docstring to emphasize this
-    # ALSO IT WOULD BE NICE TO REMOVE THE DEPENDENCY ON YamboLatticeDB ALSO
-    # FOR TETRA CASE...
-    qpts = lat.red_kpoints
+    qpts = qpoints_red
     if ktree is None : ktree = build_ktree(qpts)
     idx_Q_plus_q = find_kpt(ktree, qpts + qpts[Q,:])  # q+Q
     exc_energies = exc_energies[idx_Q_plus_q,:]
 
     # Creation of auxiliary index x=(b,m,s)
+    N_aux = nmodes*nexc_out*2
     
     # Construct scattering strengths G2[q,x] and apply thresholds
-    exc_ph_aux, x_table = get_G2_aux(exc_ph_mat_el,ph_energies,PH_thresh)
+    if no_matrix_elements: exc_ph_aux = np.ones(nexc_in,nqpts,N_aux)
+    else: exc_ph_aux, x_table = get_G2_aux(exc_ph_mat_el,ph_energies,PH_thresh)
     if free_memory: del exc_ph_mat_el
     
     # construct occupation functions F[q,x] 
@@ -176,20 +167,19 @@ def exc_ph_lifetimes():
     
     # construct generalized scattering strength C=2\pi*G2*F
     # and poles E_o(Q+q)+-E_ph(q)
-    N_aux = nmodes*nexc_out*2
-    C = np.zeros(N_aux)
-    C[:nmodes*nexc_out] = exc_ph_aux*F_aux[0]
-    C[nmodes*nexc_out:] = exc_ph_aux*F_aux[1]
+    C = np.zeros(nexc_in,nqpts,N_aux)
+    C[:,:,:nmodes*nexc_out] = 2.*np.pi*exc_ph_aux*F_aux[0]
+    C[:,:,nmodes*nexc_out:] = 2.*np.pi*exc_ph_aux*F_aux[1]
     if free_memory: del exc_ph_aux,F_aux
     E = np.zeros(N_aux)
-    E[:nmodes*nexc_out] = E_aux[0]
-    E[nmodes*nexc_out:] = E_aux[1]
+    E[:,:nmodes*nexc_out] = E_aux[0]
+    E[:,nmodes*nexc_out:] = E_aux[1]
     if free_memory: del E_aux
 
     # send to external function for evaluation with lorentzian
     # parallelised here with joblib
     broad = broad/2. # We are using explicit Lorentzian shape
-    invtau = np.array( list( tqdm( Parallel(return_as="generator",n_jobs=njobs)(delayed(lifetime_lorentzian)(exc_energies[iE_in]/ha2ev,C,E/ha2ev,broad/ha2ev) for iE_in in range(nexc_in)), total=nexc_in, desc="Exc-ph lifetime calculation")))
+    invtau = np.array( list( tqdm( Parallel(return_as="generator",n_jobs=njobs)(delayed(lifetime_lorentzian)(exc_energies[iE_in]/ha2ev,C[iE_in],E/ha2ev,broad/ha2ev) for iE_in in range(nexc_in)), total=nexc_in, desc="Exc-ph lifetime calculation")))
     # serial check
     #invtau = np.zeros(nexc_in)
     #for iE_in tqdm(range(nexc_in),desc="Exc-ph lifetime calculation") :
@@ -198,8 +188,7 @@ def exc_ph_lifetimes():
         
     # send to external function for evaluation with tetrahedra
     # use internal tetrahedron parallelization
-    RLAT = lat.rlat*lat.alat[0]
-    invtau = lifetime_tetra(C,E/ha2ev,exc_energies_in/ha2ev,qpts,RLAT,njobs=njobs)
+    invtau = lifetime_tetra(C,E/ha2ev,exc_energies_in/ha2ev,qpts,RLAT=rlat_cc,njobs=njobs)
 
     return invtau
 
@@ -217,13 +206,13 @@ def lifetime_lorentzian(C,E,E_in,eta):
     invtau = np.einsum('qx,qx->',C,delta_funct,optimize=True)
     return invtau * ha2ev * 1000. # return value in meV
     
-def lifetime_tetra(C,E,E_in,qpts,RLAT,njobs=1):
+def lifetime_tetra(C,E,E_in,qpts,RLAT=1.,njobs=1):
     """
     Evaluation with optimized tetrahedron method
 
     NB: all quantities in hartree
     """
-    tetra = get_tetrahedra_mesh(nk1,nk2,nk3,qpts,RLAT)
+    nq1,nq2,nq3 = check_kgrid(qpts)
+    tetra = get_tetrahedra_mesh(nq1,nq2,nq3,qpts,RLAT)
     invtau = spectra_tetrahedron(E,tetra,E_in,nspin=1,matels=C,njobs=njobs)
-    return invtau * ha2ev * 1000.
-
+    return invtau * ha2ev * 1000. # return value in meV

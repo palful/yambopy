@@ -326,7 +326,7 @@ def point_is_on_border(car_k,rlat,Nshells=3,tol=1e-6):
         if is_border>0: border_points_indx.append(ik)
     return border_points_indx
 
-def check_kgrid(red_kpts,rlat,tol=1e-5):
+def check_kgrid(red_kpts,rlat=None,tol=1e-5):
     """
     Analysis of Monkhorst-Pack grid
 
@@ -336,6 +336,7 @@ def check_kgrid(red_kpts,rlat,tol=1e-5):
 
     It returns:
     :: Ngrid [Nx, Ny, Nz] -> MP grid size
+    if rlat is not None:
     :: min_dk_rlu         -> minimal k-steps in grid
     """
     def ind_min_pos(a,tol=1e-5):
@@ -357,25 +358,26 @@ def check_kgrid(red_kpts,rlat,tol=1e-5):
     ksteps = [1. if stp == 0. else stp for stp in ksteps]
     Ngrid  = [ int(np.round(1./stp)) for stp in ksteps]
 
-    # Check farthest points from origin along x,y,z
-    kpt_max_xyz =  [ kpts[np.argmax(np.abs(kx))],\
-                     kpts[np.argmax(np.abs(ky))],\
-                     kpts[np.argmax(np.abs(kz))] ]
+    if rlat is None: return Ngrid
 
-    # Are they on the border?
-    kdir_has_edge = point_is_on_border( red_car(kpt_max_xyz,rlat), rlat)
+    if rlat is not None:
+        # Check farthest points from origin along x,y,z
+        kpt_max_xyz =  [ kpts[np.argmax(np.abs(kx))],\
+                         kpts[np.argmax(np.abs(ky))],\
+                         kpts[np.argmax(np.abs(kz))] ]
 
-    # The min k step is used to find the calculated points
-    # on the grid along symmetry directions for band plots.
-    # If some BZ-edge pts are missing along xyz, we must not
-    # consider that step size.
-    if not any(kdir_has_edge):
-        print("[WARNING] It looks like no points on the BZ border\
-                         might be sampled: check that this is what you want.")
-    min_dk_rlu = min([ksteps[ik] if ik in kdir_has_edge else np.inf \
-                     for ik in range(3)])
+        # Are they on the border?
+        kdir_has_edge = point_is_on_border( red_car(kpt_max_xyz,rlat), rlat)
 
-    return Ngrid, min_dk_rlu
+        # The min k step is used to find the calculated points
+        # on the grid along symmetry directions for band plots.
+        # If some BZ-edge pts are missing along xyz, we must not
+        # consider that step size.
+        if not any(kdir_has_edge):
+            print("[WARNING] It looks like no points on the BZ border might be sampled: check that this is what you want.")
+        min_dk_rlu = min([ksteps[ik] if ik in kdir_has_edge else np.inf for ik in range(3)])
+
+        return Ngrid, min_dk_rlu
 
 def generate_kpoint_grid(nk1,nk2,nk3,sym_and_trev,IBZ=True,eps=1.0e-5):
     """

@@ -79,8 +79,9 @@ def exciton_X_matelem(exe_kvec, O_qvec, Akq, Ak, Omn, kpts, contribution='b', di
     # Shape of the wavefunction coefficients
     n_exe_out, bse_calc, ns, nk, nc, nv = Akq.shape
     n_exe_in                            = Ak.shape[0]
-    if n_exe_in < n_exe_out:
-        print(f"[WARNING] less intermediate states {n_exe_in} than final states {n_exe_out}")
+    # FP: the following warning only makes sense in PL where exe_in is the intermediate
+    #if n_exe_in < n_exe_out:
+    #    print(f"[WARNING] less intermediate states {n_exe_in} than final states {n_exe_out}")
     #
     # Ensure that the shapes of Akq and Ak match
     assert Akq.shape[1:] == Ak.shape[1:], "Wavefunction coefficient mismatch"

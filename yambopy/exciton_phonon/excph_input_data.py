@@ -11,7 +11,7 @@ from yambopy.kpoints import find_kpt
 
 def exc_ph_get_inputs(lat_path,elph_path,bse_path1,mode='PL',bse_path2=None,
                       wf_path=None,dipoles_path=None,nexc_in='all',nexc_out='all',
-                      phonons_range=[],overwrite=False,dmat_file='Dmats.npy',
+                      Q_in=0,phonons_range=[],overwrite=False,dmat_file='Dmats.npy',
                       exph_file='Ex-ph.npy',dip_file='exc_dipoles.npy'):
     """
     This functions creates the necessary inputs for exciton-phonon calculations,
@@ -51,8 +51,8 @@ def exc_ph_get_inputs(lat_path,elph_path,bse_path1,mode='PL',bse_path2=None,
         Number of Lin excitons. Default all.
     nexc_out : int, optional
         Number of Lout excitons. Default all.
-    phonons_range : int list [b_i,b_f], optional
-        Number of phonon modes included. Python indexing. Right one is excluded.
+    Q_in : int, optional
+        Index of "initial" state in full BZ. In PL it is 0 (default, Gamma point).
     phonons_range : int list [ph_i,ph_f], optional
         Number of phonon modes included. Python indexing. Right one is excluded.
     overwrite : bool, optional
@@ -63,6 +63,8 @@ def exc_ph_get_inputs(lat_path,elph_path,bse_path1,mode='PL',bse_path2=None,
     if wf_path is None:   wf_path = lat_path
     if mode=='PL' and dipoles_path is None:
         raise ValueError('Please specify `dipoles_path` to ndb.dipoles directory')
+    if mode=='PL' and Q_in!=0:
+        raise ValueError('In PL, recombining state must be at Q_in=0')
 
     # Load lattice
     lattice = YamboLatticeDB.from_db_file(filename=f'{lat_path}/ns.db1')
@@ -90,12 +92,12 @@ def exc_ph_get_inputs(lat_path,elph_path,bse_path1,mode='PL',bse_path2=None,
 
     # Load exciton energies (Lin)
     if bse_path2 is not None:
-        excdb_in = YamboExcitonDB.from_db_file(lattice,filename='ndb.BS_diago_Q1',\
+        excdb_in = YamboExcitonDB.from_db_file(lattice,filename=f'ndb.BS_diago_Q{Q_in+1}',\
                                                folder=bse_path2,Load_WF=False,\
                                                neigs=nexc_in)
         exc_energies_in = excdb_in.eigenvalues.real
     else:
-        exc_energies_in = exc_energies[0]
+        exc_energies_in = exc_energies[Q_in]
 
     if bse_path2 is None: bse_path2 = bse_path1
     

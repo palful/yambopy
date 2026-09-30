@@ -13,7 +13,7 @@ from yambopy.tools.citations import citation
 from joblib import Parallel, delayed
 
 @citation("To be added")
-def exc_ph_lifetimes(nexc_in,ph_temp,ph_energies,exc_energies,exc_ph_mat_el,qpoints_red,Q=0,nexc_out=-1,exc_temp=0.,broad=0.005,BZ_integral='lorentzian',exc_energies_in=None,ktree=None,rlat_cc=1.,njobs=1,free_memory=False,as_yambo=False):
+def exc_ph_lifetimes(nexc_in,ph_temp,ph_energies,exc_energies,exc_ph_mat_el,qpoints_red,Q=0,nexc_out=-1,exc_temp=0.,broad=0.005,BZ_integral='lorentzian',exc_energies_in=None,ktree=None,rlat_cc=1.,njobs=1,free_memory=False,as_yambo=False,no_matrix_elements=False):
     """
     This class calculates the exciton-phonon lifetimes using the following expression:
 
@@ -82,6 +82,8 @@ def exc_ph_lifetimes(nexc_in,ph_temp,ph_energies,exc_energies,exc_ph_mat_el,qpoi
         if remove_deg:
             deg_states = np.abs(EXC_E_in[:,None]-EXC_E_out[0,None,:])<PH_thresh
             G[0,:,deg_states]=0.
+            #for i_in in range(len(EXC_E_in)): G[0,:,i_in,i_in]=0.
+
 
         return G
 
@@ -124,9 +126,6 @@ def exc_ph_lifetimes(nexc_in,ph_temp,ph_energies,exc_energies,exc_ph_mat_el,qpoi
         # Reshaped pole energy [q,x]
         E = E.reshape(2,nq,nm*ne_o)
         return E
-
-    # Debug
-    no_matrix_elements=False
 
     # Checks
     if ('lorentzian' not in BZ_integral) and ('tetra' not in BZ_integral):
@@ -171,40 +170,36 @@ def exc_ph_lifetimes(nexc_in,ph_temp,ph_energies,exc_energies,exc_ph_mat_el,qpoi
     # Average energies of degenerate E_in states
     exc_energies_in = take_deg_average(degs_in,exc_energies_in)
 
+    # Debug option
+    if no_matrix_elements: exc_ph_mat_el[...] = 1.
+
     # Apply thresholds
     exc_ph_mat_el = apply_thresholds(exc_ph_mat_el,ph_energies,exc_energies_in,exc_energies,PH_thresh,remove_deg=as_yambo)
-    
+
     # Evaluate exc_out energies at q+Q
     qpts = qpoints_red
     if ktree is None : ktree = build_ktree(qpts)
     idx_Q_plus_q = find_kpt(ktree, qpts + qpts[Q,:])  # q+Q
     exc_energies = exc_energies[idx_Q_plus_q,:]
 
-    
     # Creation of auxiliary index x=(b,m,s)
     N_aux = nmodes*nexc_out*2
 
     # Construct scattering strengths G2[q,x]
-    if no_matrix_elements: exc_ph_aux = np.ones((nexc_in,nqpts,nmodes*nexc_out))
-    else: exc_ph_aux, x_table = get_G2_aux(exc_ph_mat_el,ph_energies)
+    exc_ph_aux, x_table = get_G2_aux(exc_ph_mat_el,ph_energies)
     if free_memory: del exc_ph_mat_el
-    
+
     # construct occupation functions F[q,x] 
     exc_min_energy = np.min(exc_energies)
     exc_occ = bose(exc_energies-exc_min_energy,exc_temp)
     ph_occ  = bose(ph_energies,ph_temp)
-    F_aux = get_F_aux(ph_occ,exc_occ) # move three lines above
+    F_aux = get_F_aux(ph_occ,exc_occ)
     if free_memory: del ph_occ, exc_occ
     
     # construct pole energys E[q,x]
     E_aux = get_E_aux(ph_energies,exc_energies)
     if free_memory: del ph_energies, exc_energies
    
-    # TESTING
-    #print(E_aux[0,0,0:7])
-    #print(exc_energies[0,x_table[0][1]:x_table[7][1]]-ph_energies[0,x_table[0][0]:x_table[7][0]])
-    #exit()
-
     # construct generalized scattering strength C=2\pi*G2*F
     # and poles E_o(Q+q)+-E_ph(q)
     C = np.zeros((nexc_in,nqpts,N_aux))
@@ -220,7 +215,8 @@ def exc_ph_lifetimes(nexc_in,ph_temp,ph_energies,exc_energies,exc_ph_mat_el,qpoi
     # parallelised here with joblib
     if BZ_integral=='lorentzian':
         broad = broad/2. # We are using explicit Lorentzian shape
-        invtau = np.array( list( tqdm( Parallel(return_as="generator",n_jobs=njobs)(delayed(lifetime_lorentzian)(exc_energies_in[iE_in]/ha2ev,C[iE_in],E/ha2ev,broad/ha2ev) for iE_in in range(nexc_in)), total=nexc_in, desc="Exc-ph lifetime calculation")))
+        invtau = lifetime_test(exc_energies_in/ha2ev,exc_energies/ha2ev,ph_energies/ha2ev,2.*np.pi*np.abs(exc_ph_mat_el)**2.,broad/ha2ev)
+        #invtau = np.array( list( tqdm( Parallel(return_as="generator",n_jobs=njobs)(delayed(lifetime_lorentzian)(exc_energies_in[iE_in]/ha2ev,C[iE_in],E/ha2ev,broad/ha2ev) for iE_in in range(nexc_in)), total=nexc_in, desc="Exc-ph lifetime calculation")))
         # serial check
         #invtau = np.zeros(nexc_in)
         #for iE_in tqdm(range(nexc_in),desc="Exc-ph lifetime calculation") :
@@ -236,6 +232,21 @@ def exc_ph_lifetimes(nexc_in,ph_temp,ph_energies,exc_energies,exc_ph_mat_el,qpoi
     invtau = take_deg_average(degs_in,invtau)
 
     return invtau
+
+def lifetime_test(E_in,E_out,E_ph,C,eta):
+    nexc_in = len(E_in)
+    nqpts,nexc_out = E_out.shape
+    nmodes = E_ph.shape[1]
+    delta_funct = np.zeros(nexc_in)
+    for i in tqdm(range(nexc_in)):
+        for j in range(nexc_out):
+            for k in range(nmodes):
+                for q in range(nqpts):
+                    e = E_in[i]-E_out[q,j]-E_ph[q,k]
+                    pole = C[q,k,i,j]/(e**2.+eta**2.)
+                    delta_funct[i]+= pole
+    delta_funct=delta_funct * eta/np.pi/nqpts
+    return delta_funct * ha2ev * 1000.
 
 def lifetime_lorentzian(E_in,C,E,eta):
     """

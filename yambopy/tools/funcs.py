@@ -43,7 +43,7 @@ def fermi_array(e_array,ef,invsmear):
     e_array = (e_array-ef)/invsmear
     return [ fermi(e) for e in e_array]
 
-def bose(Eb,Bose_Temp,max_exp=50,thr=1e-10):
+def bose(Eb,Bose_Temp,max_exp=50,T_thr=1e-10,E_thr=0.1):
     """ 
     Bose-Einstein function (accepts ndarray)
 
@@ -53,7 +53,7 @@ def bose(Eb,Bose_Temp,max_exp=50,thr=1e-10):
     If Eb=0 (e.g. phonon acoustic modes at q=0) it returns zero to avoid
     divide by zero errors: these states should be excluded from loops/calculations!
     """
-    if Bose_Temp < thr: return np.zeros(Eb.shape) # zero temperature: no occupation
+    if Bose_Temp < T_thr: return np.zeros(Eb.shape) # zero temperature: no occupation
     e = Eb/(kb*Bose_Temp)
     # Ignore overflow div by zero and return zero if energy is zero 
     # (e.g. acoustic modes at q=0). 
@@ -61,3 +61,51 @@ def bose(Eb,Bose_Temp,max_exp=50,thr=1e-10):
     with np.errstate(over='ignore',divide='ignore', invalid='ignore'): 
         n_be = np.where(e==0., 0.0, 1.0/(np.exp(e)-1.0))
     return n_be
+
+def bose2(Eb, Bose_Temp, T_cut=1e-10, E_cut=0.1):
+    """
+    Generalised version based on the yambo `bose_f` found in
+    `src/modules/mod_functions.F`
+
+    Parameters
+    ----------
+    Eb : ndarray
+        Array of energies in eV.
+    Bose_Temp : float
+        Temperature in K
+    T_cut : float
+        Cutoff for zero temperature (default 1e-10)
+    E_cut : float
+        Cutoff for the small energy approximation (default 0.1).
+
+    Returns
+    -------
+    n_be : ndarray
+        Bose function evaluated element-wise.
+    """
+    n_be = np.zeros(Eb.shape)
+
+    # Zero temperature: no occupation (treat also negative case)
+    if Bose_Temp < T_thr: 
+        n_be[Eb<0.] = -1.
+        return np.zeros(Eb.shape)
+
+    kT = kb*Bose_Temp
+    eps = np.finfo(np.float32).eps
+
+    # Masks
+    zero_energies  = np.abs(Eb) <= eps
+    small_energies = ((np.abs(Eb)>eps) & (np.abs(Eb)<=E_cut*kT))
+    large_energies = np.abs(Eb) > E_cut*kT
+
+    # Eb -> 0 : diverging occupation
+    n_BE[zero_energies] = kT / eps
+
+    # Small |Eb|: exp(Eb/T) - 1 -> Eb/T
+    n_be[small_energies] = kT / Eb[small_energies]
+
+    # Larger |Eb|: 1/( exp(Eb/T) - 1)
+    n_be[large_energies] = 1./(np.exp(Eb[large_energies]/kT)-1.)
+
+    return n_be
+
